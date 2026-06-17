@@ -2,7 +2,7 @@ import gymnasium
 from gymnasium import spaces
 from gymnasium.utils import env_checker
 import numpy as np
-from utils import adaptor, action, observation, reward, truncate, initialize, visualizer
+from utils import adaptor, action, observation, reward, truncate, initialize
 import yaml
 import os
 
@@ -67,12 +67,8 @@ class TrainEnv(gymnasium.Env):
         self.state = None
         with open(config_path, 'r') as f:
             self.config = yaml.safe_load(f)
-        self.logger = self.config['logger'] # 日志配置
         self.save_path = self.config["save_path"]
-        if self.logger:
-            self.trajectory_dir = os.path.join(self.save_path, "trajectories")
-            os.makedirs(self.trajectory_dir, exist_ok=True)
-            self.recorder = visualizer.TrajectoryRecorder()
+
 
     def step(self, agent_action):
         # Check for truncation first
@@ -92,10 +88,7 @@ class TrainEnv(gymnasium.Env):
         # Get new observations and unmarshal
         original_observation = self.adaptor.get_observation_packet()
         self.my_state, self.enemy_state, terminated = split_observation(original_observation)
-        if self.logger:
-            self.recorder.record(self.my_state, self.enemy_state)
         if not terminated:
-            print("FUCK!")
             print(self.my_state)
         # Process whole state into agent state
         self.state = observation.marshal_observation(self.my_state, self.enemy_state)
@@ -105,14 +98,18 @@ class TrainEnv(gymnasium.Env):
         if truncated:
             terminated = False
 
-        step_reward = reward.calculate_reward(prev_my_state, prev_enemy_state, self.my_state, self.enemy_state)
-
-        return self.state, step_reward, terminated, truncated, {}
+        comps = reward.reward_components(prev_my_state, prev_enemy_state, self.my_state, self.enemy_state)
+        step_reward = comps["total"]
+        info = {
+            "reward_comps": comps,
+        }
+        for k, v in comps.items():
+            if k != "total":
+                info[f"r/{k}"] = float(v)
+        return self.state, step_reward, terminated, truncated, info
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
-        if self.logger:
-            self.recorder.reset()
         self.adaptor.reconnect()
         new_initial_packet = pack_initial(initialize.generate_initial_state())
         self.adaptor.send_initial_packet(new_initial_packet)
