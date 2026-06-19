@@ -1,0 +1,10 @@
+# Python 训练环境依赖（阶段 0）
+# 本地 Python 3.12；课程模板原建议 3.9，SB3/Gymnasium 在 3.12 下可正常使用
+
+numpy>=1.24,<3
+pyyaml>=6.0
+gymnasium>=0.29,<1.0
+stable-baselines3[extra]>=2.3,<3.0
+torch>=2.2,<3.0
+matplotlib>=3.7
+pandas>=2.0
