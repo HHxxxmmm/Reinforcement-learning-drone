@@ -8,26 +8,25 @@ import os
 
 def float_to_bool(f):
     if f == 0.0:
-        print("False!")
         return False
-    elif f == 1.0:
-        print("True!")
+    if f == 1.0:
         return True
-    else:
-        # Should not be here!
-        print(f)
-        print("Float comparison error!")
-        return None
+    raise ValueError(f"Unexpected termination flag: {f}")
 
 
-def pack_initial(initial_observation):
+def pack_initial(initial_observation, room_id=0, unit_id=0, state=2, sync_step=1):
     integer_observation = initial_observation.astype(np.int32)
-    room = 114514
-    unit = 1919810
-    initial_packet = np.array([room], dtype=np.int32)
-    initial_packet = np.append(initial_packet, unit)
-    initial_packet = np.append(initial_packet, integer_observation)
-    return initial_packet
+    if integer_observation.shape[0] != 24:
+        raise ValueError(f"initial body must be 24 int32, got {integer_observation.shape[0]}")
+
+    packet = np.zeros(100, dtype=np.int32)
+    packet[0] = room_id
+    packet[1] = unit_id
+    packet[2:14] = integer_observation[:12]
+    packet[14:26] = integer_observation[12:24]
+    packet[26] = state
+    packet[27] = sync_step
+    return packet
 
 
 def split_observation(observation):
@@ -59,15 +58,20 @@ class TrainEnv(gymnasium.Env):
         observation_lower_bound = np.negative(np.ones(shape=[15], dtype=np.float64))
         self.observation_space = spaces.Box(shape=[15], dtype=np.float64, low=observation_lower_bound, high=observation_upper_bound)
 
-        # Initialize adaptor
+        # 仅创建 adaptor，reset() 时再连接（避免 __init__ 空连一次干扰握手）
         self.adaptor = adaptor.NetworkAdaptor(config_path)
-        self.adaptor.connect()
 
         self.my_state, self.enemy_state = None, None
         self.state = None
-        with open(config_path, 'r') as f:
+        with open(config_path, 'r', encoding='utf-8') as f:
             self.config = yaml.safe_load(f)
         self.save_path = self.config["save_path"]
+        self.room_id = self.config.get("room_id", 0)
+        self.unit_id = self.config.get("unit_id", 0)
+        # 联机训练 state=2，本地训练 state=1（见 MATLAB/get_my_initial.m）
+        self.initial_state = 2 if self.config.get("train_mode", "online") == "online" else 1
+        self.sync_step = int(self.config.get("sync_step", 1))
+        self.verbose = bool(self.config.get("logger", False))
 
 
     def step(self, agent_action):
@@ -88,7 +92,7 @@ class TrainEnv(gymnasium.Env):
         # Get new observations and unmarshal
         original_observation = self.adaptor.get_observation_packet()
         self.my_state, self.enemy_state, terminated = split_observation(original_observation)
-        if not terminated:
+        if self.verbose:
             print(self.my_state)
         # Process whole state into agent state
         self.state = observation.marshal_observation(self.my_state, self.enemy_state)
@@ -110,11 +114,24 @@ class TrainEnv(gymnasium.Env):
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
-        self.adaptor.reconnect()
-        new_initial_packet = pack_initial(initialize.generate_initial_state())
+        self.adaptor.connect()
+        new_initial_packet = pack_initial(
+            initialize.generate_initial_state(),
+            room_id=self.room_id,
+            unit_id=self.unit_id,
+            state=self.initial_state,
+            sync_step=self.sync_step,
+        )
         self.adaptor.send_initial_packet(new_initial_packet)
-        # Get new observations and unmarshal
-        original_observation = self.adaptor.get_observation_packet()
+        # 部分服务器在 initial 后还需一帧 control 才推送观测
+        try:
+            original_observation = self.adaptor.get_observation_packet()
+        except TimeoutError:
+            if self.verbose:
+                print("initial 后无观测，尝试发送空动作...")
+            noop = pack_action(action.marshal_action(np.zeros(4, dtype=np.float64)), False)
+            self.adaptor.send_action_packet(noop)
+            original_observation = self.adaptor.get_observation_packet()
         self.my_state, self.enemy_state, termination = split_observation(original_observation)
         # Process whole state into agent state
         self.state = observation.marshal_observation(self.my_state, self.enemy_state)

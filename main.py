@@ -1,58 +1,125 @@
 """
-main函数，用于训练模型并保存
+训练入口：PPO + Checkpoint + 奖励分项回调 + TensorBoard。
+
+用法（UE 房间已开、envs.yaml 已配对）:
+    python main.py
+    python main.py --config ./config/algs.yaml
 """
+import argparse
 import os
-import matplotlib.pyplot as plt
-import pandas as pd
-from envs.train_env import TrainEnv
-from stable_baselines3 import PPO, SAC, TD3
-from torch import nn
-from stable_baselines3.common.monitor import Monitor
+from pathlib import Path
+
+import torch
+import yaml
+from stable_baselines3 import PPO
+from stable_baselines3.common.callbacks import CallbackList, CheckpointCallback
 from stable_baselines3.common.logger import configure
-from stable_baselines3.common.callbacks import CheckpointCallback
+from stable_baselines3.common.monitor import Monitor
+from torch import nn
+
+from envs.train_env import TrainEnv
+from utils.callback import RewardComponentsCallback
+
+ROOT = Path(__file__).resolve().parent
+
+
+def load_yaml(path):
+    with open(path, encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+
+def resolve_device(device_cfg):
+    if device_cfg is None or device_cfg == "auto":
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    return device_cfg
+
+
+def build_policy_kwargs(raw):
+    raw = raw or {}
+    net_arch = raw.get("net_arch", {"pi": [128, 128], "vf": [128, 128]})
+    return dict(
+        activation_fn=nn.Tanh,
+        net_arch=net_arch,
+        ortho_init=bool(raw.get("ortho_init", False)),
+    )
+
 
 def main():
-    log_dir = "./logs/"
-    os.makedirs(log_dir, exist_ok=True)
-    logger = configure(log_dir, ["stdout", "csv"])
-    checkpoint_callback = CheckpointCallback(
-        save_freq=100000,
-        save_path="./model/",
-        name_prefix="model",
-        save_replay_buffer=True,
-        save_vecnormalize=True,
+    parser = argparse.ArgumentParser(description="PPO 训练")
+    parser.add_argument(
+        "--env-config",
+        default=str(ROOT / "config" / "envs.yaml"),
+        help="仿真环境配置",
     )
-    base_env = TrainEnv(config_path='./config/envs.yaml')
-    env = Monitor(base_env)
+    parser.add_argument(
+        "--config",
+        default=str(ROOT / "config" / "algs.yaml"),
+        help="算法与训练超参配置",
+    )
+    args = parser.parse_args()
 
-    policy_kwargs = dict(
-        activation_fn=nn.Tanh,
-        net_arch=dict(pi=[128, 128], vf=[128, 128]),
-        ortho_init=False,
-    )
+    alg_cfg = load_yaml(args.config)
+    env_cfg = load_yaml(args.env_config)
+
+    log_dir = alg_cfg.get("log_dir", "./logs/")
+    model_dir = alg_cfg.get("model_dir", "./model/")
+    os.makedirs(log_dir, exist_ok=True)
+    os.makedirs(model_dir, exist_ok=True)
+
+    device = resolve_device(alg_cfg.get("device", "auto"))
+    ppo_cfg = alg_cfg.get("ppo", {})
+
+    print(f"环境: {env_cfg.get('host')}:{env_cfg.get('port')} room={env_cfg.get('room_id')}")
+    print(f"训练: {alg_cfg.get('algorithm', 'PPO')} device={device} steps={alg_cfg.get('total_timesteps')}")
+    print(f"日志: {log_dir}  模型: {model_dir}")
+    print("请确认 UE 已进入对战画面后再开始训练。")
+
+    logger = configure(log_dir, ["stdout", "csv", "tensorboard"])
+    callbacks = CallbackList([
+        CheckpointCallback(
+            save_freq=int(alg_cfg.get("checkpoint", {}).get("save_freq", 5000)),
+            save_path=model_dir,
+            name_prefix=alg_cfg.get("checkpoint", {}).get("name_prefix", "ppo_simple"),
+        ),
+        RewardComponentsCallback(
+            csv_path=alg_cfg.get("reward_components_csv"),
+        ),
+    ])
+
+    base_env = TrainEnv(config_path=args.env_config)
+    env = Monitor(base_env, filename=os.path.join(log_dir, "monitor.csv"))
 
     model = PPO(
         policy="MlpPolicy",
         env=env,
         verbose=1,
         tensorboard_log=log_dir,
-        learning_rate=2e-4,  # 先 3e-4；KL 高就降至 2e-4
-        n_steps=512,  # 512（每env）
-        batch_size=256,  # e.g. 1024
-        n_epochs=5,  # 3-5 都行
-        gamma=0.99,  # 你的任务短回合 → 0.98更灵敏
-        gae_lambda=0.95,
-        clip_range=0.2,  # 0.15~0.2 之间
-        ent_coef=0.003,  # 探索；看entropy曲线微调
-        vf_coef=0.6,  # 值函数比重略高些
-        max_grad_norm=0.5,
-        target_kl=0.02,  # 早停阈：0.015~0.03
-        policy_kwargs=policy_kwargs,
-        device="cpu",
+        learning_rate=float(ppo_cfg.get("learning_rate", 2e-4)),
+        n_steps=int(ppo_cfg.get("n_steps", 512)),
+        batch_size=int(ppo_cfg.get("batch_size", 256)),
+        n_epochs=int(ppo_cfg.get("n_epochs", 5)),
+        gamma=float(ppo_cfg.get("gamma", 0.99)),
+        gae_lambda=float(ppo_cfg.get("gae_lambda", 0.95)),
+        clip_range=float(ppo_cfg.get("clip_range", 0.2)),
+        ent_coef=float(ppo_cfg.get("ent_coef", 0.003)),
+        vf_coef=float(ppo_cfg.get("vf_coef", 0.6)),
+        max_grad_norm=float(ppo_cfg.get("max_grad_norm", 0.5)),
+        target_kl=float(ppo_cfg.get("target_kl", 0.02)),
+        policy_kwargs=build_policy_kwargs(ppo_cfg.get("policy_kwargs")),
+        device=device,
     )
     model.set_logger(logger)
-    model.learn(total_timesteps=20000,progress_bar=True, reset_num_timesteps=False,log_interval=1,
-                callback=checkpoint_callback)
+    model.learn(
+        total_timesteps=int(alg_cfg.get("total_timesteps", 20000)),
+        progress_bar=bool(alg_cfg.get("progress_bar", True)),
+        reset_num_timesteps=bool(alg_cfg.get("reset_num_timesteps", True)),
+        log_interval=int(alg_cfg.get("log_interval", 1)),
+        callback=callbacks,
+    )
+    final_path = os.path.join(model_dir, "ppo_simple_final")
+    model.save(final_path)
+    print(f"训练完成，最终模型已保存: {final_path}.zip")
+
 
 if __name__ == "__main__":
     main()

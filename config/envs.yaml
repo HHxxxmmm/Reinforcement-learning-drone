@@ -1,8 +1,12 @@
 host: 10.119.14.141
-port: 1000
-#pos_scale: 100
-#vel_scale: 10
-logger: true
-#train_type: "APPROACH"
-save_path: "../logs/single_training/"
-#max_steps: 2000
+
+# Simple vs 固定靶机：只连单位0
+port: 1002
+unit_id: 0
+room_id: 7831
+
+train_mode: online
+sync_step: 1
+socket_timeout: 30
+logger: false
+save_path: "./logs/single_training/"
