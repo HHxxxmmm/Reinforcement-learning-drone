@@ -2,6 +2,11 @@ import numpy as np
 
 
 POSITION_SCALE_M = 10.0
+MAX_HP = 1000.0
+HIT_DAMAGE_HP = 10.0
+ATTACK_MIN_RANGE_M = 60.0
+ATTACK_MAX_RANGE_M = 660.0
+ATTACK_HALF_WIDTH_M = 10.0
 EPS = 1e-8
 
 
@@ -10,7 +15,7 @@ def _position_m(state):
 
 
 def _health(state):
-    return float(state[12]) if len(state) > 12 else 100.0
+    return float(state[12]) if len(state) > 12 else MAX_HP
 
 
 def _forward_vector(state):
@@ -51,15 +56,20 @@ def reward_components(prev_my_state, prev_enemy_state, my_state, enemy_state):
     comps["distance_progress"] = _clamp(closing_m / 50.0, -2.0, 2.0)
     comps["proximity"] = 0.6 * np.exp(-distance / 1200.0)
     comps["alignment"] = 1.2 * alignment_cos
+    if ATTACK_MIN_RANGE_M <= forward_distance <= ATTACK_MAX_RANGE_M:
+        lateral_score = _clamp(1.0 - lateral_error / ATTACK_HALF_WIDTH_M, -1.0, 1.0)
+        comps["attack_box"] = 2.0 * max(0.0, alignment_cos) * lateral_score
+    else:
+        comps["attack_box"] = -0.2 * max(0.0, alignment_cos)
     if forward_distance > 0.0:
         comps["corridor"] = 1.6 * max(0.0, alignment_cos) * np.exp(-lateral_error / 20.0)
     else:
         comps["corridor"] = -0.4
-    comps["enemy_damage"] = 12.0 * enemy_damage
-    comps["self_damage"] = -12.0 * self_damage
+    comps["enemy_damage"] = 20.0 * (enemy_damage / HIT_DAMAGE_HP)
+    comps["self_damage"] = -20.0 * (self_damage / HIT_DAMAGE_HP)
     comps["survival"] = -0.02
-    comps["kill_bonus"] = 150.0 if _health(prev_enemy_state) > 0.0 and _health(enemy_state) <= 0.0 else 0.0
-    comps["death_penalty"] = -150.0 if _health(prev_my_state) > 0.0 and _health(my_state) <= 0.0 else 0.0
+    comps["kill_bonus"] = 300.0 if _health(prev_enemy_state) > 0.0 and _health(enemy_state) <= 0.0 else 0.0
+    comps["death_penalty"] = -300.0 if _health(prev_my_state) > 0.0 and _health(my_state) <= 0.0 else 0.0
 
     comps["total"] = float(sum(comps.values()))
     return comps

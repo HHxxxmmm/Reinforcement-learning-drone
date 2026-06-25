@@ -5,7 +5,7 @@ import numpy as np
 from utils import initialize, reward, truncate
 
 
-def make_state(pos, angles=(0.0, 0.0, 0.0), vel=(0.0, 0.0, 0.0), health=100.0):
+def make_state(pos, angles=(0.0, 0.0, 0.0), vel=(0.0, 0.0, 0.0), health=1000.0):
     state = np.zeros(13, dtype=np.float64)
     state[0:3] = np.array(pos, dtype=np.float64)
     state[3:6] = np.array(angles, dtype=np.float64)
@@ -19,7 +19,7 @@ class RewardTests(unittest.TestCase):
         prev_my = make_state((0.0, 0.0, 20.0))
         prev_enemy = make_state((120.0, 0.0, 20.0))
         my = make_state((5.0, 0.0, 20.0))
-        enemy = make_state((120.0, 0.0, 20.0), health=95.0)
+        enemy = make_state((120.0, 0.0, 20.0), health=990.0)
 
         comps = reward.reward_components(prev_my, prev_enemy, my, enemy)
 
@@ -41,9 +41,9 @@ class RewardTests(unittest.TestCase):
 
     def test_closing_aligned_attack_with_damage_is_rewarded(self):
         prev_my = make_state((0.0, 0.0, 20.0), angles=(0.0, 0.0, 0.0))
-        prev_enemy = make_state((120.0, 0.0, 20.0), health=100.0)
+        prev_enemy = make_state((120.0, 0.0, 20.0), health=1000.0)
         my = make_state((10.0, 0.0, 20.0), angles=(0.0, 0.0, 0.0))
-        enemy = make_state((120.0, 0.0, 20.0), health=95.0)
+        enemy = make_state((120.0, 0.0, 20.0), health=990.0)
 
         comps = reward.reward_components(prev_my, prev_enemy, my, enemy)
 
@@ -53,11 +53,40 @@ class RewardTests(unittest.TestCase):
         self.assertGreater(comps["enemy_damage"], 0.0)
         self.assertGreater(comps["total"], 0.0)
 
+    def test_single_hit_damage_uses_documented_ten_hp_scale(self):
+        prev_my = make_state((0.0, 0.0, 20.0), angles=(0.0, 0.0, 0.0))
+        prev_enemy = make_state((12.0, 0.0, 20.0), health=1000.0)
+        my = make_state((0.0, 0.0, 20.0), angles=(0.0, 0.0, 0.0))
+        enemy = make_state((12.0, 0.0, 20.0), health=990.0)
+
+        comps = reward.reward_components(prev_my, prev_enemy, my, enemy)
+
+        self.assertAlmostEqual(comps["enemy_damage"], 20.0)
+
+    def test_attack_box_reward_requires_documented_front_range(self):
+        prev_my = make_state((0.0, 0.0, 20.0), angles=(0.0, 0.0, 0.0))
+        prev_enemy = make_state((7.0, 0.0, 20.0))
+        my = make_state((0.0, 0.0, 20.0), angles=(0.0, 0.0, 0.0))
+        inside_enemy = make_state((7.0, 0.0, 20.0))
+        too_close_enemy = make_state((5.0, 0.0, 20.0))
+        too_far_enemy = make_state((70.0, 0.0, 20.0))
+        lateral_enemy = make_state((7.0, 2.0, 20.0))
+
+        inside = reward.reward_components(prev_my, prev_enemy, my, inside_enemy)
+        too_close = reward.reward_components(prev_my, prev_enemy, my, too_close_enemy)
+        too_far = reward.reward_components(prev_my, prev_enemy, my, too_far_enemy)
+        lateral = reward.reward_components(prev_my, prev_enemy, my, lateral_enemy)
+
+        self.assertGreater(inside["attack_box"], 0.0)
+        self.assertLessEqual(too_close["attack_box"], 0.0)
+        self.assertLessEqual(too_far["attack_box"], 0.0)
+        self.assertLess(lateral["attack_box"], inside["attack_box"])
+
     def test_moving_away_misaligned_and_taking_damage_is_penalized(self):
         prev_my = make_state((0.0, 0.0, 20.0), angles=(0.0, 0.0, np.pi))
-        prev_enemy = make_state((120.0, 0.0, 20.0), health=100.0)
-        my = make_state((-10.0, 0.0, 20.0), angles=(0.0, 0.0, np.pi), health=90.0)
-        enemy = make_state((120.0, 0.0, 20.0), health=100.0)
+        prev_enemy = make_state((120.0, 0.0, 20.0), health=1000.0)
+        my = make_state((-10.0, 0.0, 20.0), angles=(0.0, 0.0, np.pi), health=990.0)
+        enemy = make_state((120.0, 0.0, 20.0), health=1000.0)
 
         comps = reward.reward_components(prev_my, prev_enemy, my, enemy)
 
@@ -76,6 +105,8 @@ class InitializeTests(unittest.TestCase):
         enemy_pos = initial[12:15].astype(np.float64) * 10.0
         self.assertGreaterEqual(np.linalg.norm(enemy_pos - my_pos), 1000.0)
         self.assertGreater(initial[2], 0)
+        self.assertGreaterEqual(initial[6], 20)
+        self.assertLessEqual(initial[6], 40)
         self.assertGreaterEqual(initial[18], 0)
 
 
