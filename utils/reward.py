@@ -2,20 +2,33 @@ import numpy as np
 
 
 POSITION_SCALE_M = 10.0
-MAX_HP = 1000.0
-HIT_DAMAGE_HP = 10.0
+DEFAULT_HP = 1.0
+NORMALIZED_HP_THRESHOLD = 1.5
+NORMALIZED_HIT_DAMAGE_HP = 0.01
+THOUSAND_POINT_HIT_DAMAGE_HP = 10.0
+FIXED_TARGET_POS_UNIT = np.array([120.0, 0.0, 30.0])
 ATTACK_MIN_RANGE_M = 60.0
 ATTACK_MAX_RANGE_M = 660.0
 ATTACK_HALF_WIDTH_M = 10.0
 EPS = 1e-8
 
 
-def _position_m(state):
-    return np.asarray(state[0:3], dtype=np.float64) * POSITION_SCALE_M
+def _position_m(state, enemy=False):
+    pos = np.asarray(state[0:3], dtype=np.float64)
+    if enemy and np.linalg.norm(pos) < EPS:
+        pos = FIXED_TARGET_POS_UNIT
+    return pos * POSITION_SCALE_M
 
 
 def _health(state):
-    return float(state[12]) if len(state) > 12 else MAX_HP
+    return float(state[12]) if len(state) > 12 else DEFAULT_HP
+
+
+def _hit_damage_scale(*states):
+    max_hp = max(_health(state) for state in states)
+    if max_hp <= NORMALIZED_HP_THRESHOLD:
+        return NORMALIZED_HIT_DAMAGE_HP
+    return THOUSAND_POINT_HIT_DAMAGE_HP
 
 
 def _forward_vector(state):
@@ -29,7 +42,7 @@ def _forward_vector(state):
 
 
 def _range_and_los(my_state, enemy_state):
-    rel = _position_m(enemy_state) - _position_m(my_state)
+    rel = _position_m(enemy_state, enemy=True) - _position_m(my_state)
     distance = np.linalg.norm(rel)
     los = rel / (distance + EPS)
     return distance, los, rel
@@ -51,6 +64,8 @@ def reward_components(prev_my_state, prev_enemy_state, my_state, enemy_state):
     lateral_error = np.linalg.norm(rel - forward_distance * forward)
     enemy_damage = max(0.0, _health(prev_enemy_state) - _health(enemy_state))
     self_damage = max(0.0, _health(prev_my_state) - _health(my_state))
+    enemy_hit_damage = _hit_damage_scale(prev_enemy_state, enemy_state)
+    self_hit_damage = _hit_damage_scale(prev_my_state, my_state)
 
     comps = {}
     comps["distance_progress"] = _clamp(closing_m / 50.0, -2.0, 2.0)
@@ -65,8 +80,8 @@ def reward_components(prev_my_state, prev_enemy_state, my_state, enemy_state):
         comps["corridor"] = 1.6 * max(0.0, alignment_cos) * np.exp(-lateral_error / 20.0)
     else:
         comps["corridor"] = -0.4
-    comps["enemy_damage"] = 20.0 * (enemy_damage / HIT_DAMAGE_HP)
-    comps["self_damage"] = -20.0 * (self_damage / HIT_DAMAGE_HP)
+    comps["enemy_damage"] = 20.0 * (enemy_damage / enemy_hit_damage)
+    comps["self_damage"] = -20.0 * (self_damage / self_hit_damage)
     comps["survival"] = -0.02
     comps["kill_bonus"] = 300.0 if _health(prev_enemy_state) > 0.0 and _health(enemy_state) <= 0.0 else 0.0
     comps["death_penalty"] = -300.0 if _health(prev_my_state) > 0.0 and _health(my_state) <= 0.0 else 0.0

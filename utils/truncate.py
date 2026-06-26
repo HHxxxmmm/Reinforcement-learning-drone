@@ -5,11 +5,15 @@ POSITION_SCALE_M = 10.0
 MIN_ALTITUDE_UNIT = 1.0
 MAX_SEPARATION_M = 5000.0
 MAX_ABS_POSITION_UNIT = 1000.0
+FIXED_TARGET_POS_UNIT = np.array([120.0, 0.0, 30.0])
+EPS = 1e-8
 
 
 def check_truncation(my_state, enemy_state):
     my_pos = np.asarray(my_state[0:3], dtype=np.float64)
     enemy_pos = np.asarray(enemy_state[0:3], dtype=np.float64)
+    if np.linalg.norm(enemy_pos) < EPS:
+        enemy_pos = FIXED_TARGET_POS_UNIT
     separation_m = np.linalg.norm((enemy_pos - my_pos) * POSITION_SCALE_M)
 
     if not np.all(np.isfinite(my_pos)) or not np.all(np.isfinite(enemy_pos)):
