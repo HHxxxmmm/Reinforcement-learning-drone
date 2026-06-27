@@ -27,8 +27,10 @@ class RewardTests(unittest.TestCase):
             "distance_progress",
             "proximity",
             "alignment",
+            "attack_box",
             "corridor",
             "enemy_damage",
+            "enemy_hp_shaping",
             "self_damage",
             "survival",
             "total",
@@ -41,9 +43,9 @@ class RewardTests(unittest.TestCase):
 
     def test_closing_aligned_attack_with_damage_is_rewarded(self):
         prev_my = make_state((0.0, 0.0, 20.0), angles=(0.0, 0.0, 0.0))
-        prev_enemy = make_state((120.0, 0.0, 20.0), health=1.0)
+        prev_enemy = make_state((65.0, 0.0, 20.0), health=1.0)
         my = make_state((10.0, 0.0, 20.0), angles=(0.0, 0.0, 0.0))
-        enemy = make_state((120.0, 0.0, 20.0), health=0.99)
+        enemy = make_state((65.0, 0.0, 20.0), health=0.99)
 
         comps = reward.reward_components(prev_my, prev_enemy, my, enemy)
 
@@ -61,7 +63,7 @@ class RewardTests(unittest.TestCase):
 
         comps = reward.reward_components(prev_my, prev_enemy, my, enemy)
 
-        self.assertAlmostEqual(comps["enemy_damage"], 20.0)
+        self.assertAlmostEqual(comps["enemy_damage"], 8.0)
 
     def test_damage_reward_also_accepts_thousand_point_hp_scale(self):
         prev_my = make_state((0.0, 0.0, 20.0), angles=(0.0, 0.0, 0.0))
@@ -71,7 +73,28 @@ class RewardTests(unittest.TestCase):
 
         comps = reward.reward_components(prev_my, prev_enemy, my, enemy)
 
-        self.assertAlmostEqual(comps["enemy_damage"], 20.0)
+        self.assertAlmostEqual(comps["enemy_damage"], 8.0)
+
+    def test_enemy_damage_only_scores_inside_attack_box(self):
+        prev_my = make_state((0.0, 0.0, 20.0), angles=(0.0, 0.0, 0.0))
+        prev_enemy = make_state((120.0, 0.0, 20.0), health=1.0)
+        my = make_state((0.0, 0.0, 20.0), angles=(0.0, 0.0, 0.0))
+        enemy = make_state((120.0, 0.0, 20.0), health=0.99)
+
+        comps = reward.reward_components(prev_my, prev_enemy, my, enemy)
+
+        self.assertLessEqual(comps["attack_box"], 0.0)
+        self.assertEqual(comps["enemy_damage"], 0.0)
+
+    def test_low_enemy_hp_shaping_encourages_finishing_target(self):
+        my = make_state((60.0, 0.0, 30.0), angles=(0.0, 0.0, 0.0))
+        high_hp_enemy = make_state((120.0, 0.0, 30.0), health=0.8)
+        low_hp_enemy = make_state((120.0, 0.0, 30.0), health=0.2)
+
+        high = reward.reward_components(my, high_hp_enemy, my, high_hp_enemy)
+        low = reward.reward_components(my, low_hp_enemy, my, low_hp_enemy)
+
+        self.assertGreater(low["enemy_hp_shaping"], high["enemy_hp_shaping"])
 
     def test_attack_box_reward_requires_documented_front_range(self):
         prev_my = make_state((0.0, 0.0, 20.0), angles=(0.0, 0.0, 0.0))

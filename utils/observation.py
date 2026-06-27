@@ -8,6 +8,7 @@ MAX_DIST_UNIT    = 500.0       # 500 units = 5000 m  (matches truncate.MAX_SEPAR
 MAX_ALT_UNIT     = 100.0       # 100 units = 1000 m  (reasonable combat ceiling)
 MAX_SPEED_UNIT   = 30.0        #  30 units =  300 m/s
 MAX_HP           = 1.0           # Server sends hp as [0, 1] float; 0.01 per hit, ~100 hits to kill
+FIXED_TARGET_POS_UNIT = np.array([120.0, 0.0, 30.0])
 EPS              = 1e-8
 
 
@@ -18,6 +19,13 @@ def _forward_vector(state: np.ndarray) -> np.ndarray:
     cp = np.cos(pitch)
     fwd = np.array([cp * np.cos(yaw), cp * np.sin(yaw), np.sin(pitch)])
     return fwd / (np.linalg.norm(fwd) + EPS)
+
+
+def _position(state: np.ndarray, enemy: bool = False) -> np.ndarray:
+    pos = np.asarray(state[0:3], dtype=np.float64)
+    if enemy and np.linalg.norm(pos) < EPS:
+        return FIXED_TARGET_POS_UNIT
+    return pos
 
 
 # ——————————————————————————————
@@ -47,8 +55,8 @@ def marshal_observation(my_state, enemy_state):
     enemy_state = np.asarray(enemy_state, dtype=np.float64)
 
     # ---- positions ----------------------------------------------------
-    my_pos    = my_state[0:3]
-    enemy_pos = enemy_state[0:3]
+    my_pos    = _position(my_state)
+    enemy_pos = _position(enemy_state, enemy=True)
     rel_pos   = enemy_pos - my_pos                     # 3-d
 
     # ---- distance & line‑of‑sight -------------------------------------

@@ -10,6 +10,9 @@ FIXED_TARGET_POS_UNIT = np.array([120.0, 0.0, 30.0])
 ATTACK_MIN_RANGE_M = 60.0
 ATTACK_MAX_RANGE_M = 660.0
 ATTACK_HALF_WIDTH_M = 10.0
+DAMAGE_REWARD_PER_HIT = 8.0
+SELF_DAMAGE_PENALTY_PER_HIT = 14.0
+ENEMY_HP_SHAPING_WEIGHT = 4.0
 EPS = 1e-8
 
 
@@ -29,6 +32,13 @@ def _hit_damage_scale(*states):
     if max_hp <= NORMALIZED_HP_THRESHOLD:
         return NORMALIZED_HIT_DAMAGE_HP
     return THOUSAND_POINT_HIT_DAMAGE_HP
+
+
+def _hp_fraction(state):
+    hp = _health(state)
+    if hp <= NORMALIZED_HP_THRESHOLD:
+        return _clamp(hp, 0.0, 1.0)
+    return _clamp(hp / 1000.0, 0.0, 1.0)
 
 
 def _forward_vector(state):
@@ -52,6 +62,14 @@ def _clamp(value, low, high):
     return float(np.clip(value, low, high))
 
 
+def _attack_box_score(forward_distance, lateral_error, alignment_cos):
+    if not (ATTACK_MIN_RANGE_M <= forward_distance <= ATTACK_MAX_RANGE_M):
+        return -0.2 * max(0.0, alignment_cos), False
+    lateral_score = _clamp(1.0 - lateral_error / ATTACK_HALF_WIDTH_M, -1.0, 1.0)
+    score = 3.0 * max(0.0, alignment_cos) * lateral_score
+    return score, lateral_error <= ATTACK_HALF_WIDTH_M and alignment_cos > 0.0
+
+
 # This is the reward calculation function. We provide current state and previous state for you.
 def reward_components(prev_my_state, prev_enemy_state, my_state, enemy_state):
     prev_distance, _, _ = _range_and_los(prev_my_state, prev_enemy_state)
@@ -69,19 +87,17 @@ def reward_components(prev_my_state, prev_enemy_state, my_state, enemy_state):
 
     comps = {}
     comps["distance_progress"] = _clamp(closing_m / 50.0, -2.0, 2.0)
-    comps["proximity"] = 0.6 * np.exp(-distance / 1200.0)
-    comps["alignment"] = 1.2 * alignment_cos
-    if ATTACK_MIN_RANGE_M <= forward_distance <= ATTACK_MAX_RANGE_M:
-        lateral_score = _clamp(1.0 - lateral_error / ATTACK_HALF_WIDTH_M, -1.0, 1.0)
-        comps["attack_box"] = 2.0 * max(0.0, alignment_cos) * lateral_score
-    else:
-        comps["attack_box"] = -0.2 * max(0.0, alignment_cos)
+    comps["proximity"] = 0.15 * np.exp(-distance / 1200.0)
+    comps["alignment"] = 2.0 * alignment_cos
+    attack_box_score, in_attack_box = _attack_box_score(forward_distance, lateral_error, alignment_cos)
+    comps["attack_box"] = attack_box_score
     if forward_distance > 0.0:
-        comps["corridor"] = 1.6 * max(0.0, alignment_cos) * np.exp(-lateral_error / 20.0)
+        comps["corridor"] = 1.2 * max(0.0, alignment_cos) * np.exp(-lateral_error / 20.0)
     else:
         comps["corridor"] = -0.4
-    comps["enemy_damage"] = 20.0 * (enemy_damage / enemy_hit_damage)
-    comps["self_damage"] = -20.0 * (self_damage / self_hit_damage)
+    comps["enemy_damage"] = DAMAGE_REWARD_PER_HIT * (enemy_damage / enemy_hit_damage) if in_attack_box else 0.0
+    comps["self_damage"] = -SELF_DAMAGE_PENALTY_PER_HIT * (self_damage / self_hit_damage)
+    comps["enemy_hp_shaping"] = ENEMY_HP_SHAPING_WEIGHT * (1.0 - _hp_fraction(enemy_state))
     comps["survival"] = -0.02
     comps["kill_bonus"] = 300.0 if _health(prev_enemy_state) > 0.0 and _health(enemy_state) <= 0.0 else 0.0
     comps["death_penalty"] = -300.0 if _health(prev_my_state) > 0.0 and _health(my_state) <= 0.0 else 0.0
