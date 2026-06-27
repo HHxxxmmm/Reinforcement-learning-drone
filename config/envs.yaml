@@ -1,9 +1,9 @@
 host: 10.119.14.141
 
 # Simple vs 固定靶机：只连单位0
-port: 1002
+port: 1003
 unit_id: 0
-room_id: 7831
+room_id: 13100
 
 train_mode: online
 sync_step: 1
