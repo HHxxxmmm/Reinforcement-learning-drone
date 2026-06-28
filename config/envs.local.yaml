@@ -1,0 +1,10 @@
+host: 127.0.0.1
+port: 1000
+unit_id: 0
+room_id: 0
+
+train_mode: local
+sync_step: 1
+socket_timeout: 30
+logger: false
+save_path: "./logs/single_training/"

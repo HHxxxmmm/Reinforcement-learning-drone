@@ -45,6 +45,22 @@ def pack_action(action, truncated):
     return full_pack
 
 
+def is_expected_initial_observation(my_state, enemy_state, initial_body, position_tolerance_unit=5.0):
+    expected_my = initial_body[:3].astype(np.float64)
+    expected_enemy = initial_body[12:15].astype(np.float64)
+    my_pos = np.asarray(my_state[:3], dtype=np.float64)
+    enemy_pos = np.asarray(enemy_state[:3], dtype=np.float64)
+    my_hp = float(my_state[12]) if len(my_state) > 12 else 0.0
+    enemy_hp = float(enemy_state[12]) if len(enemy_state) > 12 else 0.0
+
+    return (
+        np.linalg.norm(my_pos - expected_my) <= position_tolerance_unit
+        and np.linalg.norm(enemy_pos - expected_enemy) <= position_tolerance_unit
+        and my_hp >= 900.0
+        and enemy_hp >= 900.0
+    )
+
+
 class TrainEnv(gymnasium.Env):
     def __init__(self, config_path):
         super().__init__()
@@ -54,9 +70,9 @@ class TrainEnv(gymnasium.Env):
         action_lower_bound = np.negative(np.ones(shape=[4], dtype=np.float64))
         self.action_space = spaces.Box(shape=[4], dtype=np.float64, low=action_lower_bound, high=action_upper_bound)
 
-        observation_upper_bound = np.ones(shape=[16], dtype=np.float64)
-        observation_lower_bound = np.negative(np.ones(shape=[16], dtype=np.float64))
-        self.observation_space = spaces.Box(shape=[16], dtype=np.float64, low=observation_lower_bound, high=observation_upper_bound)
+        observation_upper_bound = np.ones(shape=[20], dtype=np.float64)
+        observation_lower_bound = np.negative(np.ones(shape=[20], dtype=np.float64))
+        self.observation_space = spaces.Box(shape=[20], dtype=np.float64, low=observation_lower_bound, high=observation_upper_bound)
 
         # 仅创建 adaptor，reset() 时再连接（避免 __init__ 空连一次干扰握手）
         self.adaptor = adaptor.NetworkAdaptor(config_path)
@@ -115,25 +131,35 @@ class TrainEnv(gymnasium.Env):
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         self.adaptor.connect()
+        initial_body = initialize.generate_initial_state()
         new_initial_packet = pack_initial(
-            initialize.generate_initial_state(),
+            initial_body,
             room_id=self.room_id,
             unit_id=self.unit_id,
             state=self.initial_state,
             sync_step=self.sync_step,
         )
-        self.adaptor.send_initial_packet(new_initial_packet)
-        # 部分服务器在 initial 后还需一帧 control 才推送观测
-        try:
-            original_observation = self.adaptor.get_observation_packet()
-        except TimeoutError:
+        noop = pack_action(action.marshal_action(np.zeros(4, dtype=np.float64)), False)
+        finish_round = pack_action(action.marshal_action(np.zeros(4, dtype=np.float64)), True)
+
+        for attempt in range(6):
+            self.adaptor.send_initial_packet(new_initial_packet)
+            try:
+                original_observation = self.adaptor.get_observation_packet()
+            except TimeoutError:
+                if self.verbose:
+                    print("No observation after initial packet; sending a noop action.")
+                self.adaptor.send_action_packet(noop)
+                original_observation = self.adaptor.get_observation_packet()
+
+            self.my_state, self.enemy_state, termination = split_observation(original_observation)
+            if is_expected_initial_observation(self.my_state, self.enemy_state, initial_body):
+                break
+
             if self.verbose:
-                print("initial 后无观测，尝试发送空动作...")
-            noop = pack_action(action.marshal_action(np.zeros(4, dtype=np.float64)), False)
-            self.adaptor.send_action_packet(noop)
-            original_observation = self.adaptor.get_observation_packet()
-        self.my_state, self.enemy_state, termination = split_observation(original_observation)
-        # Process whole state into agent state
+                print("discard stale reset observation:", self.my_state, self.enemy_state)
+            self.adaptor.send_action_packet(finish_round)
+
         self.state = observation.marshal_observation(self.my_state, self.enemy_state)
         return self.state, {}
 

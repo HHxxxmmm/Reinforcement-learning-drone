@@ -29,8 +29,13 @@ class RewardTests(unittest.TestCase):
             "alignment",
             "attack_box",
             "corridor",
+            "centerline",
+            "turn_penalty",
             "enemy_damage",
             "enemy_hp_shaping",
+            "overshoot",
+            "finish_centerline",
+            "finish_speed_penalty",
             "self_damage",
             "survival",
             "total",
@@ -86,15 +91,17 @@ class RewardTests(unittest.TestCase):
         self.assertLessEqual(comps["attack_box"], 0.0)
         self.assertEqual(comps["enemy_damage"], 0.0)
 
-    def test_low_enemy_hp_shaping_encourages_finishing_target(self):
+    def test_enemy_hp_shaping_rewards_hp_reduction_not_static_low_hp(self):
         my = make_state((60.0, 0.0, 30.0), angles=(0.0, 0.0, 0.0))
-        high_hp_enemy = make_state((120.0, 0.0, 30.0), health=0.8)
-        low_hp_enemy = make_state((120.0, 0.0, 30.0), health=0.2)
+        prev_enemy = make_state((120.0, 0.0, 30.0), health=1000.0)
+        damaged_enemy = make_state((120.0, 0.0, 30.0), health=990.0)
+        static_low_enemy = make_state((120.0, 0.0, 30.0), health=50.0)
 
-        high = reward.reward_components(my, high_hp_enemy, my, high_hp_enemy)
-        low = reward.reward_components(my, low_hp_enemy, my, low_hp_enemy)
+        damaged = reward.reward_components(my, prev_enemy, my, damaged_enemy)
+        static_low = reward.reward_components(my, static_low_enemy, my, static_low_enemy)
 
-        self.assertGreater(low["enemy_hp_shaping"], high["enemy_hp_shaping"])
+        self.assertGreater(damaged["enemy_hp_shaping"], 0.0)
+        self.assertEqual(static_low["enemy_hp_shaping"], 0.0)
 
     def test_attack_box_reward_requires_documented_front_range(self):
         prev_my = make_state((0.0, 0.0, 20.0), angles=(0.0, 0.0, 0.0))
@@ -139,6 +146,80 @@ class RewardTests(unittest.TestCase):
         self.assertLess(comps["self_damage"], 0.0)
         self.assertLess(comps["total"], 0.0)
 
+    def test_centerline_reward_prefers_small_lateral_error_before_attack_box(self):
+        prev_my = make_state((0.0, 0.0, 30.0), angles=(0.0, 0.0, 0.0))
+        prev_enemy = make_state((80.0, 0.0, 30.0))
+        my = make_state((0.0, 0.0, 30.0), angles=(0.0, 0.0, 0.0))
+        centered_enemy = make_state((80.0, 0.0, 30.0))
+        side_enemy = make_state((80.0, 20.0, 30.0))
+
+        centered = reward.reward_components(prev_my, prev_enemy, my, centered_enemy)
+        side = reward.reward_components(prev_my, prev_enemy, my, side_enemy)
+
+        self.assertGreater(centered["centerline"], side["centerline"])
+
+    def test_turn_penalty_discourages_large_angular_rates(self):
+        prev_my = make_state((0.0, 0.0, 30.0), angles=(0.0, 0.0, 0.0))
+        prev_enemy = make_state((80.0, 0.0, 30.0))
+        steady = make_state((0.0, 0.0, 30.0), angles=(0.0, 0.0, 0.0))
+        turning = make_state((0.0, 0.0, 30.0), angles=(0.0, 0.0, 0.0))
+        turning[9:12] = np.array([0.0, 0.0, 2.0])
+        enemy = make_state((80.0, 0.0, 30.0))
+
+        steady_comps = reward.reward_components(prev_my, prev_enemy, steady, enemy)
+        turning_comps = reward.reward_components(prev_my, prev_enemy, turning, enemy)
+
+        self.assertEqual(steady_comps["turn_penalty"], 0.0)
+        self.assertLess(turning_comps["turn_penalty"], steady_comps["turn_penalty"])
+
+    def test_overshoot_penalizes_passing_alive_target(self):
+        prev_my = make_state((0.0, 0.0, 30.0), angles=(0.0, 0.0, 0.0))
+        prev_enemy = make_state((80.0, 0.0, 30.0), health=50.0)
+        passed_my = make_state((82.0, 0.0, 30.0), angles=(0.0, 0.0, 0.0))
+        enemy = make_state((80.0, 0.0, 30.0), health=50.0)
+
+        comps = reward.reward_components(prev_my, prev_enemy, passed_my, enemy)
+
+        self.assertLess(comps["overshoot"], 0.0)
+
+    def test_finish_centerline_penalizes_lateral_error_near_alive_target(self):
+        prev_my = make_state((60.0, 0.0, 30.0), angles=(0.0, 0.0, 0.0))
+        prev_enemy = make_state((80.0, 0.0, 30.0), health=50.0)
+        centered_my = make_state((60.0, 0.0, 30.0), angles=(0.0, 0.0, 0.0))
+        side_my = make_state((60.0, 0.0, 30.0), angles=(0.0, 0.0, 0.0))
+        centered_enemy = make_state((80.0, 0.0, 30.0), health=50.0)
+        side_enemy = make_state((80.0, 2.0, 30.0), health=50.0)
+
+        centered = reward.reward_components(prev_my, prev_enemy, centered_my, centered_enemy)
+        side = reward.reward_components(prev_my, prev_enemy, side_my, side_enemy)
+
+        self.assertGreater(centered["finish_centerline"], side["finish_centerline"])
+        self.assertGreater(centered["finish_centerline"], 3.5)
+
+    def test_finish_speed_penalty_discourages_high_speed_near_alive_target(self):
+        prev_my = make_state((60.0, 0.0, 30.0), angles=(0.0, 0.0, 0.0), vel=(12.0, 0.0, 0.0))
+        prev_enemy = make_state((80.0, 0.0, 30.0), health=50.0)
+        slow_my = make_state((60.0, 0.0, 30.0), angles=(0.0, 0.0, 0.0), vel=(12.0, 0.0, 0.0))
+        fast_my = make_state((60.0, 0.0, 30.0), angles=(0.0, 0.0, 0.0), vel=(30.0, 0.0, 0.0))
+        enemy = make_state((80.0, 0.0, 30.0), health=50.0)
+
+        slow = reward.reward_components(prev_my, prev_enemy, slow_my, enemy)
+        fast = reward.reward_components(prev_my, prev_enemy, fast_my, enemy)
+
+        self.assertEqual(slow["finish_speed_penalty"], 0.0)
+        self.assertLess(fast["finish_speed_penalty"], slow["finish_speed_penalty"])
+        self.assertAlmostEqual(fast["finish_speed_penalty"], -1.2)
+
+    def test_finish_speed_penalty_ignores_far_target(self):
+        prev_my = make_state((0.0, 0.0, 30.0), angles=(0.0, 0.0, 0.0), vel=(30.0, 0.0, 0.0))
+        prev_enemy = make_state((80.0, 0.0, 30.0), health=50.0)
+        fast_my = make_state((0.0, 0.0, 30.0), angles=(0.0, 0.0, 0.0), vel=(30.0, 0.0, 0.0))
+        enemy = make_state((80.0, 0.0, 30.0), health=50.0)
+
+        comps = reward.reward_components(prev_my, prev_enemy, fast_my, enemy)
+
+        self.assertEqual(comps["finish_speed_penalty"], 0.0)
+
 
 class InitializeTests(unittest.TestCase):
     def test_initial_state_has_two_aircraft_and_safe_start_distance(self):
@@ -147,8 +228,8 @@ class InitializeTests(unittest.TestCase):
         self.assertEqual(initial.shape, (24,))
         my_pos = initial[0:3].astype(np.float64) * 10.0
         enemy_pos = initial[12:15].astype(np.float64) * 10.0
-        self.assertGreaterEqual(np.linalg.norm(enemy_pos - my_pos), 1000.0)
-        np.testing.assert_array_equal(initial[12:15], np.array([120, 0, 30]))
+        self.assertGreaterEqual(np.linalg.norm(enemy_pos - my_pos), 700.0)
+        np.testing.assert_array_equal(initial[12:15], np.array([80, 0, 30]))
         self.assertGreater(initial[2], 0)
         self.assertGreaterEqual(initial[6], 20)
         self.assertLessEqual(initial[6], 40)

@@ -13,6 +13,14 @@ ATTACK_HALF_WIDTH_M = 10.0
 DAMAGE_REWARD_PER_HIT = 8.0
 SELF_DAMAGE_PENALTY_PER_HIT = 14.0
 ENEMY_HP_SHAPING_WEIGHT = 4.0
+CENTERLINE_SCALE_M = 120.0
+TURN_RATE_PENALTY_WEIGHT = 0.04
+OVERSHOOT_PENALTY = 8.0
+FINISH_RANGE_M = 250.0
+FINISH_CENTERLINE_SCALE_M = 25.0
+FINISH_SPEED_TARGET_MPS = 180.0
+FINISH_SPEED_PENALTY_WEIGHT = 0.01
+MAX_FINISH_SPEED_PENALTY = 4.0
 EPS = 1e-8
 
 
@@ -84,6 +92,9 @@ def reward_components(prev_my_state, prev_enemy_state, my_state, enemy_state):
     self_damage = max(0.0, _health(prev_my_state) - _health(my_state))
     enemy_hit_damage = _hit_damage_scale(prev_enemy_state, enemy_state)
     self_hit_damage = _hit_damage_scale(prev_my_state, my_state)
+    angular_rate = np.linalg.norm(np.asarray(my_state[9:12], dtype=np.float64))
+    speed_mps = np.linalg.norm(np.asarray(my_state[6:9], dtype=np.float64)) * POSITION_SCALE_M
+    enemy_alive = _health(enemy_state) > 0.0
 
     comps = {}
     comps["distance_progress"] = _clamp(closing_m / 50.0, -2.0, 2.0)
@@ -95,9 +106,22 @@ def reward_components(prev_my_state, prev_enemy_state, my_state, enemy_state):
         comps["corridor"] = 1.2 * max(0.0, alignment_cos) * np.exp(-lateral_error / 20.0)
     else:
         comps["corridor"] = -0.4
+    if forward_distance > 0.0:
+        comps["centerline"] = 1.8 * max(0.0, alignment_cos) * np.exp(-lateral_error / CENTERLINE_SCALE_M)
+    else:
+        comps["centerline"] = -0.4
+    comps["turn_penalty"] = -TURN_RATE_PENALTY_WEIGHT * min(angular_rate, 5.0)
     comps["enemy_damage"] = DAMAGE_REWARD_PER_HIT * (enemy_damage / enemy_hit_damage) if in_attack_box else 0.0
     comps["self_damage"] = -SELF_DAMAGE_PENALTY_PER_HIT * (self_damage / self_hit_damage)
-    comps["enemy_hp_shaping"] = ENEMY_HP_SHAPING_WEIGHT * (1.0 - _hp_fraction(enemy_state))
+    comps["enemy_hp_shaping"] = ENEMY_HP_SHAPING_WEIGHT * max(0.0, _hp_fraction(prev_enemy_state) - _hp_fraction(enemy_state))
+    comps["overshoot"] = -OVERSHOOT_PENALTY if enemy_alive and forward_distance < 0.0 else 0.0
+    if enemy_alive and 0.0 < forward_distance < FINISH_RANGE_M:
+        comps["finish_centerline"] = 4.0 * max(0.0, alignment_cos) * np.exp(-lateral_error / FINISH_CENTERLINE_SCALE_M)
+        speed_excess = max(0.0, speed_mps - FINISH_SPEED_TARGET_MPS)
+        comps["finish_speed_penalty"] = -min(MAX_FINISH_SPEED_PENALTY, FINISH_SPEED_PENALTY_WEIGHT * speed_excess)
+    else:
+        comps["finish_centerline"] = 0.0
+        comps["finish_speed_penalty"] = 0.0
     comps["survival"] = -0.02
     comps["kill_bonus"] = 300.0 if _health(prev_enemy_state) > 0.0 and _health(enemy_state) <= 0.0 else 0.0
     comps["death_penalty"] = -300.0 if _health(prev_my_state) > 0.0 and _health(my_state) <= 0.0 else 0.0

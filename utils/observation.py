@@ -7,8 +7,13 @@ POSITION_SCALE_M = 10.0        # 1 position unit = 10 m
 MAX_DIST_UNIT    = 500.0       # 500 units = 5000 m  (matches truncate.MAX_SEPARATION_M)
 MAX_ALT_UNIT     = 100.0       # 100 units = 1000 m  (reasonable combat ceiling)
 MAX_SPEED_UNIT   = 30.0        #  30 units =  300 m/s
-MAX_HP           = 1.0           # Server sends hp as [0, 1] float; 0.01 per hit, ~100 hits to kill
+NORMALIZED_HP_THRESHOLD = 1.5
+THOUSAND_POINT_HP = 1000.0
 FIXED_TARGET_POS_UNIT = np.array([120.0, 0.0, 30.0])
+ATTACK_MIN_RANGE_M = 60.0
+ATTACK_MAX_RANGE_M = 660.0
+ATTACK_CENTERLINE_SCALE_M = 200.0
+VERTICAL_ERROR_SCALE_M = 200.0
 EPS              = 1e-8
 
 
@@ -26,6 +31,12 @@ def _position(state: np.ndarray, enemy: bool = False) -> np.ndarray:
     if enemy and np.linalg.norm(pos) < EPS:
         return FIXED_TARGET_POS_UNIT
     return pos
+
+
+def _hp_fraction(hp: float) -> float:
+    if hp <= NORMALIZED_HP_THRESHOLD:
+        return float(np.clip(hp, 0.0, 1.0))
+    return float(np.clip(hp / THOUSAND_POINT_HP, 0.0, 1.0))
 
 
 # ——————————————————————————————
@@ -49,7 +60,7 @@ def marshal_observation(my_state, enemy_state):
 
     Returns
     -------
-    obs : np.ndarray  shape (16,)  dtype float64  range [-1, 1]
+    obs : np.ndarray  shape (20,)  dtype float64  range [-1, 1]
     """
     my_state    = np.asarray(my_state,    dtype=np.float64)
     enemy_state = np.asarray(enemy_state, dtype=np.float64)
@@ -80,15 +91,20 @@ def marshal_observation(my_state, enemy_state):
     closing     = -np.dot(rel_vel, los)               # >0 ⇒ approaching
 
     # ---- hp -----------------------------------------------------------
-    my_hp    = float(my_state[12])
-    enemy_hp = float(enemy_state[12])
+    my_hp    = _hp_fraction(float(my_state[12]))
+    enemy_hp = _hp_fraction(float(enemy_state[12]))
 
     # ---- orientation --------------------------------------------------
     my_pitch = float(my_state[4])
     my_roll  = float(my_state[3])
 
     # === assemble observation vector ===================================
-    obs = np.zeros(16, dtype=np.float64)
+    rel_pos_m = rel_pos * POSITION_SCALE_M
+    forward_distance_m = float(np.dot(rel_pos_m, my_fwd))
+    lateral_error_m = float(np.linalg.norm(rel_pos_m - forward_distance_m * my_fwd))
+    vertical_error_m = float(rel_pos_m[2])
+
+    obs = np.zeros(20, dtype=np.float64)
 
     #  0‑ 2   relative position              [-1, 1]
     obs[0:3] = np.clip(rel_pos / MAX_DIST_UNIT, -1.0, 1.0)
@@ -112,13 +128,13 @@ def marshal_observation(my_state, enemy_state):
     obs[8]   = np.clip((my_pos[2] - enemy_pos[2]) / MAX_ALT_UNIT, -1.0, 1.0)
 
     #  9      hp difference  (mine − theirs)        [-1, 1]
-    obs[9]   = np.clip((my_hp - enemy_hp) / MAX_HP, -1.0, 1.0)
+    obs[9]   = np.clip(my_hp - enemy_hp, -1.0, 1.0)
 
     # 10      my hp ratio                      0→+1  mapped to [-1, 1]
-    obs[10]  = np.clip(2.0 * my_hp / MAX_HP - 1.0, -1.0, 1.0)
+    obs[10]  = np.clip(2.0 * my_hp - 1.0, -1.0, 1.0)
 
     # 11      enemy hp ratio                   0→+1  mapped to [-1, 1]
-    obs[11]  = np.clip(2.0 * enemy_hp / MAX_HP - 1.0, -1.0, 1.0)
+    obs[11]  = np.clip(2.0 * enemy_hp - 1.0, -1.0, 1.0)
 
     # 12      closing speed                      [-1, 1]
     obs[12]  = np.clip(closing / MAX_SPEED_UNIT, -1.0, 1.0)
@@ -131,5 +147,16 @@ def marshal_observation(my_state, enemy_state):
 
     # 15      my speed                          0→+1  mapped to [-1, 1]
     obs[15]  = np.clip(2.0 * my_speed / MAX_SPEED_UNIT - 1.0, -1.0, 1.0)
+
+    obs[16]  = np.clip(2.0 * forward_distance_m / ATTACK_MAX_RANGE_M - 1.0, -1.0, 1.0)
+    obs[17]  = np.clip(1.0 - lateral_error_m / ATTACK_CENTERLINE_SCALE_M, -1.0, 1.0)
+    obs[18]  = np.clip(vertical_error_m / VERTICAL_ERROR_SCALE_M, -1.0, 1.0)
+    if forward_distance_m < ATTACK_MIN_RANGE_M:
+        range_error_m = ATTACK_MIN_RANGE_M - forward_distance_m
+    elif forward_distance_m > ATTACK_MAX_RANGE_M:
+        range_error_m = forward_distance_m - ATTACK_MAX_RANGE_M
+    else:
+        range_error_m = 0.0
+    obs[19]  = np.clip(1.0 - range_error_m / ATTACK_MAX_RANGE_M, -1.0, 1.0)
 
     return obs

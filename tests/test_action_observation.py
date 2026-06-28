@@ -37,12 +37,45 @@ class ObservationTests(unittest.TestCase):
 
         obs = observation.marshal_observation(my, enemy)
 
-        self.assertEqual(obs.shape, (16,))
+        self.assertEqual(obs.shape, (20,))
         self.assertGreater(obs[0], 0.0)
         self.assertAlmostEqual(obs[1], 0.0)
         self.assertAlmostEqual(obs[4], 1.0)
+        self.assertGreater(obs[16], 0.0)
+        self.assertGreater(obs[17], 0.0)
         self.assertTrue(np.all(obs <= 1.0))
         self.assertTrue(np.all(obs >= -1.0))
+
+    def test_attack_geometry_features_reward_centerline_over_side_offset(self):
+        my = make_state((0.0, 0.0, 30.0), angles=(0.0, 0.0, 0.0), vel=(30.0, 0.0, 0.0))
+        centered_enemy = make_state((80.0, 0.0, 30.0))
+        side_enemy = make_state((80.0, 20.0, 30.0))
+
+        centered = observation.marshal_observation(my, centered_enemy)
+        side = observation.marshal_observation(my, side_enemy)
+
+        self.assertGreater(centered[17], side[17])
+        self.assertAlmostEqual(centered[18], 0.0)
+
+    def test_hp_features_support_thousand_point_scale(self):
+        my = make_state((0.0, 0.0, 30.0), health=1000.0)
+        enemy = make_state((80.0, 0.0, 30.0), health=500.0)
+
+        obs = observation.marshal_observation(my, enemy)
+
+        self.assertAlmostEqual(obs[9], 0.5)
+        self.assertAlmostEqual(obs[10], 1.0)
+        self.assertAlmostEqual(obs[11], 0.0)
+
+    def test_hp_features_keep_normalized_scale(self):
+        my = make_state((0.0, 0.0, 30.0), health=1.0)
+        enemy = make_state((80.0, 0.0, 30.0), health=0.5)
+
+        obs = observation.marshal_observation(my, enemy)
+
+        self.assertAlmostEqual(obs[9], 0.5)
+        self.assertAlmostEqual(obs[10], 1.0)
+        self.assertAlmostEqual(obs[11], 0.0)
 
 
 if __name__ == "__main__":

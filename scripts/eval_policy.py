@@ -15,6 +15,16 @@ if str(ROOT) not in sys.path:
 from stable_baselines3 import PPO
 
 from envs.train_env import TrainEnv
+from utils import action as action_utils
+from utils import reward as reward_utils
+
+
+def attack_geometry(my_state, enemy_state):
+    distance, _, rel = reward_utils._range_and_los(my_state, enemy_state)
+    forward = reward_utils._forward_vector(my_state)
+    forward_distance = float((rel * forward).sum())
+    lateral_error = float(((rel - forward_distance * forward) ** 2).sum() ** 0.5)
+    return distance, forward_distance, lateral_error
 
 
 def main():
@@ -82,10 +92,15 @@ def main():
 
             if steps % args.log_interval == 0:
                 comps = info.get("reward_comps", {})
+                real_action = action_utils.marshal_action(agent_action)
+                distance, forward_distance, lateral_error = attack_geometry(env.my_state, env.enemy_state)
                 print(
                     f"step={steps:5d} reward={reward:8.3f} total={total_reward:9.3f} "
+                    f"dist={distance:7.1f} fwd={forward_distance:7.1f} lat={lateral_error:7.1f} "
                     f"my_hp={env.my_state[12]:.3f} enemy_hp={env.enemy_state[12]:.3f} "
+                    f"yaw={env.my_state[5]:.3f} act=[{real_action[0]:.2f},{real_action[1]:.2f},{real_action[2]:.2f},{real_action[3]:.2f}] "
                     f"attack_box={comps.get('attack_box', 0.0):.3f} "
+                    f"centerline={comps.get('centerline', 0.0):.3f} "
                     f"enemy_damage={comps.get('enemy_damage', 0.0):.3f}"
                 )
 
