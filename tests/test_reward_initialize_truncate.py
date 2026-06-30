@@ -324,6 +324,23 @@ class InitializeTests(unittest.TestCase):
         self.assertTrue(ys.issubset(set(range(-5, 6))))
         self.assertGreater(len(ys), 1)
 
+    def test_enemy_y_positive_prob_skews_toward_positive_side(self):
+        pos = 0
+        neg = 0
+        for _ in range(400):
+            y = int(
+                initialize.generate_initial_state(
+                    combat_enemy_y_range=[-5, 5],
+                    combat_enemy_y_positive_prob=0.75,
+                )[13]
+            )
+            if y > 0:
+                pos += 1
+            elif y < 0:
+                neg += 1
+        self.assertGreater(pos, neg)
+        self.assertGreater(pos, 200)
+
 
 class TruncateTests(unittest.TestCase):
     def test_truncates_low_altitude_and_extreme_separation(self):

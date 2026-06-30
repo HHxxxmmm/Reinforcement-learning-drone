@@ -1,33 +1,34 @@
-# Stage-2 Phase-3: 恢复 y 随机，续训 phase2 最终 ckpt
+# Stage-2 Phase-3: 从 p30k_resume@31k 续训（极保守 PPO，防 1k 步后左偏坍缩）
 algorithm: PPO
-load_path: "./model/stage2_phase2/ppo_combat_p2_final.zip"
-total_timesteps: 100000
+load_path: "./model/stage2_phase3_p30k_resume/ppo_combat_p3_p30k_resume_31000_steps.zip"
+reset_yaw_head_on_load: false
+total_timesteps: 5000
 reset_num_timesteps: false
 log_interval: 1
 progress_bar: true
 
-log_dir: "./logs/stage2_phase3/"
-model_dir: "./model/stage2_phase3/"
-reward_components_csv: "./logs/stage2_phase3/reward_components.csv"
+log_dir: "./logs/stage2_phase3_p31k_resume/"
+model_dir: "./model/stage2_phase3_p31k_resume/"
+reward_components_csv: "./logs/stage2_phase3_p31k_resume/reward_components.csv"
 
 checkpoint:
-  save_freq: 5000
-  name_prefix: "ppo_combat_p3"
+  save_freq: 1000
+  name_prefix: "ppo_combat_p3_p31k_resume"
 
 device: auto
 
 ppo:
-  learning_rate: 1.0e-4
-  n_steps: 512
+  learning_rate: 1.0e-5
+  n_steps: 768
   batch_size: 256
-  n_epochs: 5
+  n_epochs: 1
   gamma: 0.99
   gae_lambda: 0.95
-  clip_range: 0.1
-  ent_coef: 0.002
+  clip_range: 0.04
+  ent_coef: 0.008
   vf_coef: 0.5
   max_grad_norm: 0.5
-  target_kl: 0.05
+  target_kl: 0.015
   policy_kwargs:
     net_arch:
       pi: [128, 128]

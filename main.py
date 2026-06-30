@@ -19,6 +19,7 @@ from torch import nn
 
 from envs.train_env import TrainEnv
 from utils.callback import RewardComponentsCallback
+from utils.policy_reset import reset_policy_yaw_head
 
 ROOT = Path(__file__).resolve().parent
 
@@ -125,6 +126,17 @@ def main():
             raise FileNotFoundError(f"Checkpoint not found: {load_path}")
         model = PPO.load(load_path, env=env, device=device)
         model.set_env(env)
+        if alg_cfg.get("reset_yaw_head_on_load", False):
+            info = reset_policy_yaw_head(
+                model,
+                yaw_action_idx=int(alg_cfg.get("yaw_action_idx", 3)),
+                log_std_init=alg_cfg.get("yaw_log_std_init_on_load"),
+            )
+            print(
+                "已重置 yaw 输出头（保留油门等其它维度）: "
+                f"action_idx={info['yaw_action_idx']} bias={info['yaw_bias']:.4f} "
+                f"log_std={info['yaw_log_std']}"
+            )
     else:
         model = PPO(**ppo_kwargs)
     model.set_logger(logger)

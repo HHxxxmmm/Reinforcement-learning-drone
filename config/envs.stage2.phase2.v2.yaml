@@ -1,9 +1,9 @@
 # Stage-2 Phase-2 v2: 从 P1@30000 重训（reward 数值同权重化前，机制仍可通过 yaml 覆盖）
 host: 10.119.14.141
 
-port: 1004
+port: 1005
 unit_id: 0
-room_id: 20168
+room_id: 20195
 
 train_mode: online
 sync_step: 1

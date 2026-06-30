@@ -159,6 +159,7 @@ class TrainEnv(gymnasium.Env):
                 ("altitude_unit", "combat_my_alt_unit"),
                 ("enemy_pos", "combat_enemy_pos"),
                 ("enemy_y_range", "combat_enemy_y_range"),
+                ("enemy_y_positive_prob", "combat_enemy_y_positive_prob"),
             )
             for cfg_key, init_key in mapping:
                 if cfg_key in self.stage_cfg:

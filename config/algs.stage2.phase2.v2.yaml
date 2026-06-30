@@ -1,4 +1,4 @@
-# Stage-2 Phase-2 v2: 从 P1@30000 重训，稳定 PPO 更新（防过优化崩溃）
+# Stage-2 Phase-2 v2: 从 P1@30000 重训（y=0）
 algorithm: PPO
 load_path: "./model/stage2_phase1/ppo_combat_p1_30000_steps.zip"
 total_timesteps: 80000
