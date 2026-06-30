@@ -119,6 +119,7 @@ class TrainEnv(gymnasium.Env):
         self.lock_roll = bool(action_cfg.get("lock_roll", False))
         self.lock_pitch = bool(action_cfg.get("lock_pitch", False))
         self.fixed_pitch = float(action_cfg.get("fixed_pitch", 0.0))
+        self.max_pitch = float(action_cfg.get("max_pitch", 1.0))
         self.lock_yaw = bool(action_cfg.get("lock_yaw", False))
         self.fixed_yaw = float(action_cfg.get("fixed_yaw", 0.0))
         self.max_yaw = float(action_cfg.get("max_yaw", 1.0))
@@ -210,6 +211,7 @@ class TrainEnv(gymnasium.Env):
             lock_roll=self.lock_roll,
             lock_pitch=self.lock_pitch,
             fixed_pitch=self.fixed_pitch,
+            max_pitch=self.max_pitch,
             lock_yaw=self.lock_yaw,
             fixed_yaw=self.fixed_yaw,
             max_yaw=self.max_yaw,

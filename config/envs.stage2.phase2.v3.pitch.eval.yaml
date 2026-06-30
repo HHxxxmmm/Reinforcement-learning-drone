@@ -1,15 +1,15 @@
-# Stage-2 Phase-2 v3 eval — 独立 UE 房间（不与训练 20465 冲突）
+# Stage-2 Phase-2 v3 pitch eval — 独立 UE 房间
 host: 10.119.14.141
 
 port: 1000
 unit_id: 0
-room_id: 20527
+room_id: 20545
 
 train_mode: online
 sync_step: 1
 socket_timeout: 30
 logger: false
-save_path: "./logs/stage2_phase2_v3/eval/"
+save_path: "./logs/stage2_phase2_v3_pitch/eval/"
 
 stage: combat
 
@@ -29,8 +29,7 @@ action:
   lock_throttle: false
   max_throttle: 0.35
   lock_roll: true
-  lock_pitch: true
-  fixed_pitch: 0.0
+  lock_pitch: false
+  max_pitch: 0.15
   lock_yaw: false
-  max_yaw: 0.15
   action_scale: 0.4

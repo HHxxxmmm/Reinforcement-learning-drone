@@ -6,7 +6,7 @@ import torch
 from stable_baselines3 import PPO
 
 from utils import observation
-from utils.policy_reset import reset_policy_yaw_head
+from utils.policy_reset import reset_policy_pitch_head, reset_policy_yaw_head
 
 
 def make_state(pos, angles=(0.0, 0.0, 0.0), vel=(10.0, 0.0, 0.0), health=1.0):
@@ -59,6 +59,23 @@ class PolicyResetTests(unittest.TestCase):
 
         self.assertLess(float(before[3]), -0.05)
         self.assertLess(max(abs(y) for y in after_vals), 0.05)
+
+    def test_reset_pitch_head_zeros_bias_and_preserves_throttle_row(self):
+        ckpt = Path("model/stage2_phase2_v3_nocap/ppo_combat_p2_v3_nocap_1000_steps.zip")
+        if not ckpt.is_file():
+            self.skipTest(f"missing checkpoint: {ckpt}")
+
+        model = PPO.load(str(ckpt), device="cpu")
+        throttle_row = model.policy.action_net.weight[0].detach().clone()
+        yaw_row = model.policy.action_net.weight[3].detach().clone()
+
+        info = reset_policy_pitch_head(model, pitch_action_idx=1, log_std_init=-0.5)
+
+        self.assertAlmostEqual(info["pitch_bias"], 0.0, places=5)
+        self.assertAlmostEqual(info["pitch_log_std"], -0.5, places=5)
+        self.assertTrue(torch.allclose(model.policy.action_net.weight[0], throttle_row))
+        self.assertTrue(torch.allclose(model.policy.action_net.weight[3], yaw_row))
+        self.assertAlmostEqual(float(model.policy.action_net.bias[1].item()), 0.0, places=5)
 
 
 if __name__ == "__main__":

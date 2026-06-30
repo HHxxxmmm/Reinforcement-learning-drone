@@ -9,6 +9,7 @@ def marshal_action(
     lock_roll=False,
     lock_pitch=False,
     fixed_pitch=0.0,
+    max_pitch=1.0,
     lock_yaw=False,
     fixed_yaw=0.0,
     max_yaw=1.0,
@@ -20,7 +21,7 @@ def marshal_action(
     Network output order  │  real control  │  real range
     ───────────────────────┼─────────────────┼──────────────
     action[0]  throttle    │  throttle        │  [0, max_throttle] or fixed
-    action[1]  pitch       │  pitch           │  [-1, 1]
+    action[1]  pitch       │  pitch           │  [-max_pitch, max_pitch] or fixed
     action[2]  roll        │  roll            │  [-1, 1]
     action[3]  yaw         │  yaw             │  [-max_yaw, max_yaw] or fixed
 
@@ -31,6 +32,7 @@ def marshal_action(
     real_action = np.zeros(4, dtype=np.float64)
 
     throttle_cap = float(np.clip(max_throttle, 0.0, 1.0))
+    pitch_cap = float(np.clip(max_pitch, 0.0, 1.0))
     yaw_cap = float(np.clip(max_yaw, 0.0, 1.0))
 
     if lock_throttle:
@@ -42,9 +44,9 @@ def marshal_action(
     # pitch, roll, yaw:  [-1, 1]  →  [-1, 1]  (identity with safety clip)
     scale = float(np.clip(action_scale, 0.05, 1.0))
     if lock_pitch:
-        real_action[1] = float(np.clip(fixed_pitch, -1.0, 1.0))
+        real_action[1] = float(np.clip(fixed_pitch, -pitch_cap, pitch_cap))
     else:
-        real_action[1] = np.clip(action[1] * scale, -1.0, 1.0)
+        real_action[1] = np.clip(action[1] * scale, -pitch_cap, pitch_cap)
     real_action[2] = 0.0 if lock_roll else np.clip(action[2] * scale, -1.0, 1.0)
     if lock_yaw:
         real_action[3] = float(np.clip(fixed_yaw, -yaw_cap, yaw_cap))
