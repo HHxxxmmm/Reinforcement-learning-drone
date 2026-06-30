@@ -75,6 +75,15 @@ class ActionTests(unittest.TestCase):
         self.assertAlmostEqual(low[3], -0.15)
         self.assertAlmostEqual(high[3], 0.15)
 
+    def test_marshal_action_caps_pitch_with_max_pitch(self):
+        agent_action = np.array([0.0, -1.0, 0.0, 0.0])
+
+        low = action.marshal_action(agent_action, action_scale=0.4, max_pitch=0.15)
+        high = action.marshal_action(np.array([0.0, 1.0, 0.0, 0.0]), action_scale=0.4, max_pitch=0.15)
+
+        self.assertAlmostEqual(low[1], -0.15)
+        self.assertAlmostEqual(high[1], 0.15)
+
 
 class ObservationTests(unittest.TestCase):
     def test_zero_enemy_position_uses_fixed_target_fallback(self):

@@ -1,0 +1,41 @@
+# Junior Q2 Phase-1: 从零训练 pitch+油门（不继承 Q1 simple 模型）
+algorithm: PPO
+total_timesteps: 60000
+reset_num_timesteps: true
+log_interval: 1
+progress_bar: true
+
+log_dir: "./logs/junior_q2_phase1/"
+model_dir: "./model/junior_q2_phase1/"
+reward_components_csv: "./logs/junior_q2_phase1/reward_components.csv"
+
+checkpoint:
+  save_freq: 1000
+  name_prefix: "ppo_junior_p1"
+
+device: auto
+
+# 未训练 PPO 默认 thr≈max/2（~0.23）在 junior 下会持续掉高；偏置到探针配平区
+policy_init:
+  junior_p1: true
+  throttle_frac: 0.88
+  pitch_cmd: 0.12
+
+ppo:
+  learning_rate: 2.0e-4
+  n_steps: 512
+  batch_size: 256
+  n_epochs: 5
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_range: 0.1
+  ent_coef: 0.003
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  target_kl: 0.05
+  policy_kwargs:
+    net_arch:
+      pi: [128, 128]
+      vf: [128, 128]
+    ortho_init: false
+    log_std_init: -1.0

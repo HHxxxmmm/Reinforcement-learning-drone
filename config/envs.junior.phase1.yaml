@@ -1,0 +1,64 @@
+# Junior Q2 Phase-1 v8-A-tuned: 方案 A + 训练数据调参（~280m/s 接敌、远距不截停）
+host: 10.119.14.141
+
+port: 1004
+unit_id: 0
+room_id: 20375
+
+train_mode: online
+sync_step: 1
+socket_timeout: 30
+logger: false
+save_path: "./logs/junior_q2_phase1/"
+
+stage: combat
+
+stage_params:
+  initial_speed: 11
+  altitude_unit: 100
+  enemy_pos: [120, 0, 100]
+  enemy_y_range: [0, 0]
+  max_steps_per_episode: 512
+  terminate_on_overshoot: true
+  overshoot_margin_m: 45.0
+  overshoot_use_x_axis: true
+  # 仅接敌阶段（x_close<450m）才因掉高截停，远距留时间加速/爬升
+  altitude_miss_below_m: 220.0
+  altitude_miss_range_m: 450.0
+  log_init: true
+  yaw_misalign_weight: 0.0
+  altitude_match_weight: 8.0
+  altitude_match_scale_m: 25.0
+  altitude_below_penalty_weight: 0.10
+  speed_penalty_altitude_gate_m: 30.0
+  min_lift_speed_mps: 100.0
+  lift_speed_penalty_weight: 0.008
+  speed_approach_range_m: 900.0
+  speed_cruise_cap_mps: 220.0
+  speed_cruise_penalty_weight: 0.005
+  speed_penalty_weight: 0.0
+  # 远距（>660m）低于 170m/s 罚，推动接敌加速（日志 ~114m/s 过慢）
+  approach_slow_penalty_weight: 0.012
+  approach_slow_min_mps: 170.0
+  approach_slow_range_m: 900.0
+  attack_speed_target_mps: 95.0
+  attack_speed_bonus_width_mps: 120.0
+  attack_speed_bonus_weight: 6.0
+  attack_dwell_reward_weight: 2.5
+  attack_speed_penalty_weight: 0.0
+  low_hp_attack_bonus_weight: 8.0
+  low_hp_attack_threshold: 0.25
+  enemy_hp_shaping_weight: 10.0
+  finish_centerline_weight: 4.0
+  damage_reward_per_hit: 15.0
+  kill_bonus: 450.0
+
+action:
+  lock_throttle: false
+  max_throttle: 0.46
+  lock_roll: true
+  lock_pitch: false
+  max_pitch: 0.35
+  lock_yaw: true
+  fixed_yaw: 0.0
+  action_scale: 0.50

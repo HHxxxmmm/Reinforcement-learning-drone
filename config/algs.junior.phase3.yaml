@@ -1,0 +1,37 @@
+# Junior Q2 Phase-3: 从 P2 v2@1k 续训 y∈[-5,5]（保守 PPO + 1k 早停）
+algorithm: PPO
+load_path: "./model/junior_q2_phase2_v2/ppo_junior_p2_v2_1000_steps.zip"
+reset_yaw_head_on_load: false
+total_timesteps: 20000
+reset_num_timesteps: true
+log_interval: 1
+progress_bar: true
+
+log_dir: "./logs/junior_q2_phase3/"
+model_dir: "./model/junior_q2_phase3/"
+reward_components_csv: "./logs/junior_q2_phase3/reward_components.csv"
+
+checkpoint:
+  save_freq: 1000
+  name_prefix: "ppo_junior_p3"
+
+device: auto
+
+ppo:
+  learning_rate: 3.0e-5
+  n_steps: 512
+  batch_size: 256
+  n_epochs: 3
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_range: 0.1
+  ent_coef: 0.003
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  target_kl: 0.05
+  policy_kwargs:
+    net_arch:
+      pi: [128, 128]
+      vf: [128, 128]
+    ortho_init: false
+    log_std_init: -1.0

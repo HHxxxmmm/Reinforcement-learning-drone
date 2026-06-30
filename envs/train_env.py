@@ -119,6 +119,7 @@ class TrainEnv(gymnasium.Env):
         self.lock_roll = bool(action_cfg.get("lock_roll", False))
         self.lock_pitch = bool(action_cfg.get("lock_pitch", False))
         self.fixed_pitch = float(action_cfg.get("fixed_pitch", 0.0))
+        self.max_pitch = float(action_cfg.get("max_pitch", 1.0))
         self.lock_yaw = bool(action_cfg.get("lock_yaw", False))
         self.fixed_yaw = float(action_cfg.get("fixed_yaw", 0.0))
         self.max_yaw = float(action_cfg.get("max_yaw", 1.0))
@@ -210,6 +211,7 @@ class TrainEnv(gymnasium.Env):
             lock_roll=self.lock_roll,
             lock_pitch=self.lock_pitch,
             fixed_pitch=self.fixed_pitch,
+            max_pitch=self.max_pitch,
             lock_yaw=self.lock_yaw,
             fixed_yaw=self.fixed_yaw,
             max_yaw=self.max_yaw,
@@ -244,6 +246,21 @@ class TrainEnv(gymnasium.Env):
             return True
         return self.step_count > self._episode_step_limit()
 
+    def _enemy_pos_unit(self):
+        enemy_pos = np.asarray(self.enemy_state[0:3], dtype=np.float64)
+        if np.linalg.norm(enemy_pos) < reward.EPS:
+            return np.asarray(reward.FIXED_TARGET_POS_UNIT, dtype=np.float64)
+        return enemy_pos
+
+    def _combat_forward_close_m(self):
+        _, _, rel = reward._range_and_los(self.my_state, self.enemy_state)
+        forward = reward._forward_vector(self.my_state)
+        return float(np.dot(rel, forward))
+
+    def _combat_x_close_m(self):
+        enemy_pos = self._enemy_pos_unit()
+        return (float(enemy_pos[0]) - float(self.my_state[0])) * reward.POSITION_SCALE_M
+
     def _combat_overshoot(self):
         if self.stage != "combat":
             return False
@@ -251,11 +268,49 @@ class TrainEnv(gymnasium.Env):
             return False
         if float(self.enemy_state[12]) <= 0.0:
             return False
-        _, _, rel = reward._range_and_los(self.my_state, self.enemy_state)
-        forward = reward._forward_vector(self.my_state)
-        forward_distance_m = float(np.dot(rel, forward))
         margin = float(self.stage_cfg.get("overshoot_margin_m", 0.0))
-        return forward_distance_m < margin
+        if self._combat_forward_close_m() < margin:
+            return True
+        # P1 锁 yaw 对头接敌：大 pitch 时 nose-forward 距离与 x 轴接敌距离偏差大，x 轴作 fallback
+        if self.lock_yaw and bool(self.stage_cfg.get("overshoot_use_x_axis", True)):
+            return self._combat_x_close_m() < margin
+        return False
+
+    def _combat_altitude_miss(self):
+        if self.stage != "combat":
+            return False
+        threshold_m = float(self.stage_cfg.get("altitude_miss_below_m", 0.0))
+        if threshold_m <= 0.0:
+            return False
+        if float(self.enemy_state[12]) <= 0.0:
+            return False
+        range_m = float(self.stage_cfg.get("altitude_miss_range_m", 0.0))
+        if range_m > 0.0 and self._combat_x_close_m() > range_m:
+            return False
+        enemy_pos = self._enemy_pos_unit()
+        below_m = max(0.0, float(enemy_pos[2]) - float(self.my_state[2])) * reward.POSITION_SCALE_M
+        return below_m > threshold_m
+
+    def _log_combat_episode_end(self, reason):
+        if not (self.verbose or bool(self.stage_cfg.get("log_init", False))):
+            return
+        speed_mps = float(np.linalg.norm(self.my_state[6:9])) * reward.POSITION_SCALE_M
+        my_x_m = float(self.my_state[0]) * reward.POSITION_SCALE_M
+        my_z_m = float(self.my_state[2]) * reward.POSITION_SCALE_M
+        pitch_rad = float(self.my_state[4])
+        throttle = float(self._last_real_action[0])
+        cmd_pitch = float(self._last_real_action[1])
+        enemy_hp = float(self.enemy_state[12]) if len(self.enemy_state) > 12 else 1.0
+        fwd_m = self._combat_forward_close_m()
+        x_close_m = self._combat_x_close_m()
+        margin_m = float(self.stage_cfg.get("overshoot_margin_m", 0.0))
+        print(
+            f"[combat {reason}] step={self.step_count} "
+            f"speed={speed_mps:.1f}m/s pitch={pitch_rad:+.3f}rad cmd_pitch={cmd_pitch:+.3f} thr={throttle:.2f} "
+            f"my_x={my_x_m:.0f}m alt={my_z_m:.0f}m "
+            f"enemy_hp={enemy_hp:.3f} min_hp={self._episode_min_enemy_hp:.3f} "
+            f"fwd={fwd_m:.0f}m x_close={x_close_m:.0f}m margin={margin_m:.0f}m"
+        )
 
     def _alignment_cos(self):
         if hasattr(self.reward_mod, "alignment_cos"):
@@ -270,6 +325,7 @@ class TrainEnv(gymnasium.Env):
 
         # Marshal agent actions into real actions and send
         real_action = self._marshal_action(agent_action)
+        self._last_real_action = real_action.copy()
         send_pack = pack_action(real_action, truncated)
         self.adaptor.send_action_packet(send_pack)
 
@@ -294,7 +350,13 @@ class TrainEnv(gymnasium.Env):
 
         episode_success = self._episode_success()
         episode_overshoot = self._combat_overshoot()
-        episode_timeout = self._episode_timeout() and not episode_success and not episode_overshoot
+        episode_altitude_miss = self._combat_altitude_miss()
+        episode_timeout = (
+            self._episode_timeout()
+            and not episode_success
+            and not episode_overshoot
+            and not episode_altitude_miss
+        )
         required_hold_this_ep = self._required_hold_steps() if self.stage == "align1" else 0
 
         if episode_success:
@@ -321,20 +383,12 @@ class TrainEnv(gymnasium.Env):
         elif episode_overshoot:
             truncated = True
             terminated = False
-            if self.verbose or bool(self.stage_cfg.get("log_init", False)):
-                speed_mps = float(np.linalg.norm(self.my_state[6:9])) * reward.POSITION_SCALE_M
-                my_x_m = float(self.my_state[0]) * reward.POSITION_SCALE_M
-                enemy_hp = float(self.enemy_state[12]) if len(self.enemy_state) > 12 else 1.0
-                _, _, rel = reward._range_and_los(self.my_state, self.enemy_state)
-                forward = reward._forward_vector(self.my_state)
-                fwd_m = float(np.dot(rel, forward))
-                margin_m = float(self.stage_cfg.get("overshoot_margin_m", 0.0))
-                print(
-                    f"[combat overshoot] step={self.step_count} "
-                    f"speed={speed_mps:.1f}m/s my_x={my_x_m:.0f}m "
-                    f"enemy_hp={enemy_hp:.3f} min_hp={self._episode_min_enemy_hp:.3f} "
-                    f"fwd={fwd_m:.0f}m margin={margin_m:.0f}m"
-                )
+            self._log_combat_episode_end("overshoot")
+            self._send_finish_round()
+        elif episode_altitude_miss:
+            truncated = True
+            terminated = False
+            self._log_combat_episode_end("altitude_miss")
             self._send_finish_round()
         elif episode_timeout:
             truncated = True
@@ -347,10 +401,8 @@ class TrainEnv(gymnasium.Env):
                     f"step={self.step_count} hold={self.hold_count} "
                     f"limit={self._episode_step_limit()} required={required_hold_this_ep}"
                 )
-            elif self.stage == "combat" and (
-                self.verbose or bool(self.stage_cfg.get("log_init", False))
-            ):
-                print(f"[combat max_steps] step={self.step_count}")
+            elif self.stage == "combat":
+                self._log_combat_episode_end("max_steps")
             self._send_finish_round()
         elif terminated and self.stage == "combat":
             truncated = False
@@ -388,6 +440,30 @@ class TrainEnv(gymnasium.Env):
                 "finish_centerline_weight",
                 "enemy_hp_shaping_weight",
                 "kill_bonus",
+                "altitude_match_weight",
+                "altitude_match_scale_m",
+                "altitude_below_penalty_weight",
+                "speed_penalty_weight",
+                "attack_speed_penalty_weight",
+                "speed_approach_range_m",
+                "speed_desired_min_mps",
+                "speed_desired_dist_scale",
+                "speed_cruise_cap_mps",
+                "speed_cruise_penalty_weight",
+                "attack_speed_limit_mps",
+                "attack_speed_penalty_scale_mps",
+                "speed_penalty_altitude_gate_m",
+                "min_lift_speed_mps",
+                "lift_speed_penalty_weight",
+                "attack_dwell_reward_weight",
+                "attack_speed_bonus_weight",
+                "attack_speed_target_mps",
+                "attack_speed_bonus_width_mps",
+                "low_hp_attack_bonus_weight",
+                "low_hp_attack_threshold",
+                "approach_slow_penalty_weight",
+                "approach_slow_min_mps",
+                "approach_slow_range_m",
             )
             for key in combat_reward_keys:
                 if key in self.stage_cfg:
@@ -418,6 +494,7 @@ class TrainEnv(gymnasium.Env):
         super().reset(seed=seed)
         self.step_count = 0
         self.hold_count = 0
+        self._last_real_action = np.zeros(4, dtype=np.float64)
         self._episode_min_enemy_hp = 1.0
         self._episode_start_enemy_hp = 1.0
         self.adaptor.connect()
@@ -511,7 +588,8 @@ class TrainEnv(gymnasium.Env):
                     f"enemy_y={reset_info['init_enemy_y']:.0f} "
                     f"speed={reset_info['init_speed']:.0f} "
                     f"alt={reset_info['init_altitude']:.0f} "
-                    f"enemy_hp={self._episode_start_enemy_hp:.3f}"
+                    f"enemy_hp={self._episode_start_enemy_hp:.3f} "
+                    f"thr_cap={self.max_throttle:.2f} lock_thr={self.lock_throttle}"
                 )
 
         self.state = observation.marshal_observation(self.my_state, self.enemy_state)

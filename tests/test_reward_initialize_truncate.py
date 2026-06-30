@@ -36,6 +36,8 @@ class RewardTests(unittest.TestCase):
             "enemy_hp_shaping",
             "overshoot",
             "finish_centerline",
+            "speed_cruise_penalty",
+            "speed_approach_penalty",
             "speed_penalty",
             "attack_speed_penalty",
             "self_damage",
@@ -229,6 +231,23 @@ class RewardTests(unittest.TestCase):
         self.assertAlmostEqual(reduced_comps["alignment"], default_comps["alignment"] * 0.5)
         self.assertEqual(reduced_comps["yaw_misalign_penalty"], default_comps["yaw_misalign_penalty"])
 
+    def test_altitude_match_rewards_same_height_over_offset(self):
+        prev_my = make_state((0.0, 0.0, 100.0))
+        prev_enemy = make_state((80.0, 0.0, 100.0))
+        level_my = make_state((1.0, 0.0, 100.0))
+        low_my = make_state((1.0, 0.0, 90.0))
+        enemy = make_state((80.0, 0.0, 100.0))
+
+        level_comps = reward.reward_components(
+            prev_my, prev_enemy, level_my, enemy, altitude_match_weight=4.0
+        )
+        low_comps = reward.reward_components(
+            prev_my, prev_enemy, low_my, enemy, altitude_match_weight=4.0
+        )
+
+        self.assertGreater(level_comps["altitude_match"], low_comps["altitude_match"])
+        self.assertAlmostEqual(level_comps["altitude_match"], 4.0, places=5)
+
     def test_overshoot_penalizes_passing_alive_target(self):
         prev_my = make_state((0.0, 0.0, 30.0), angles=(0.0, 0.0, 0.0))
         prev_enemy = make_state((80.0, 0.0, 30.0), health=50.0)
@@ -281,13 +300,72 @@ class RewardTests(unittest.TestCase):
 
     def test_speed_penalty_ignores_far_target(self):
         prev_my = make_state((0.0, 0.0, 30.0), angles=(0.0, 0.0, 0.0), vel=(30.0, 0.0, 0.0))
-        prev_enemy = make_state((80.0, 0.0, 30.0), health=50.0)
+        prev_enemy = make_state((200.0, 0.0, 30.0), health=50.0)
         fast_my = make_state((0.0, 0.0, 30.0), angles=(0.0, 0.0, 0.0), vel=(30.0, 0.0, 0.0))
-        enemy = make_state((80.0, 0.0, 30.0), health=50.0)
+        enemy = make_state((200.0, 0.0, 30.0), health=50.0)
 
         comps = reward.reward_components(prev_my, prev_enemy, fast_my, enemy)
 
+        self.assertEqual(comps["speed_approach_penalty"], 0.0)
         self.assertEqual(comps["speed_penalty"], 0.0)
+
+    def test_speed_cruise_penalty_caps_far_overspeed(self):
+        prev_my = make_state((0.0, 0.0, 30.0), angles=(0.0, 0.0, 0.0), vel=(30.0, 0.0, 0.0))
+        prev_enemy = make_state((200.0, 0.0, 30.0), health=50.0)
+        fast_my = make_state((0.0, 0.0, 30.0), angles=(0.0, 0.0, 0.0), vel=(45.0, 0.0, 0.0))
+        enemy = make_state((200.0, 0.0, 30.0), health=50.0)
+
+        comps = reward.reward_components(
+            prev_my,
+            prev_enemy,
+            fast_my,
+            enemy,
+            speed_approach_range_m=900.0,
+            speed_cruise_cap_mps=165.0,
+            speed_cruise_penalty_weight=0.018,
+        )
+
+        self.assertLess(comps["speed_cruise_penalty"], 0.0)
+        self.assertEqual(comps["speed_approach_penalty"], 0.0)
+
+    def test_speed_penalties_disabled_when_altitude_mismatch(self):
+        prev_my = make_state((60.0, 0.0, 30.0), angles=(0.0, 0.0, 0.0), vel=(30.0, 0.0, 0.0))
+        prev_enemy = make_state((80.0, 0.0, 30.0), health=50.0)
+        low_my = make_state((60.0, 0.0, 20.0), angles=(0.0, 0.0, 0.0), vel=(40.0, 0.0, 0.0))
+        enemy = make_state((80.0, 0.0, 30.0), health=50.0)
+
+        comps = reward.reward_components(
+            prev_my,
+            prev_enemy,
+            low_my,
+            enemy,
+            speed_penalty_weight=0.01,
+            attack_speed_penalty_weight=6.0,
+            attack_speed_limit_mps=130.0,
+            speed_penalty_altitude_gate_m=30.0,
+        )
+
+        self.assertEqual(comps["speed_penalty"], 0.0)
+        self.assertLess(comps["attack_speed_penalty"], 0.0)
+
+    def test_lift_speed_penalty_when_below_enemy(self):
+        prev_my = make_state((60.0, 0.0, 20.0), angles=(0.0, 0.0, 0.0), vel=(5.0, 0.0, 0.0))
+        prev_enemy = make_state((80.0, 0.0, 30.0), health=50.0)
+        slow_my = make_state((60.0, 0.0, 20.0), angles=(0.0, 0.0, 0.0), vel=(5.0, 0.0, 0.0))
+        fast_my = make_state((60.0, 0.0, 20.0), angles=(0.0, 0.0, 0.0), vel=(12.0, 0.0, 0.0))
+        enemy = make_state((80.0, 0.0, 30.0), health=50.0)
+
+        slow = reward.reward_components(
+            prev_my, prev_enemy, slow_my, enemy,
+            min_lift_speed_mps=110.0, lift_speed_penalty_weight=0.02,
+        )
+        fast = reward.reward_components(
+            prev_my, prev_enemy, fast_my, enemy,
+            min_lift_speed_mps=110.0, lift_speed_penalty_weight=0.02,
+        )
+
+        self.assertLess(slow["lift_speed_penalty"], 0.0)
+        self.assertEqual(fast["lift_speed_penalty"], 0.0)
 
     def test_overshoot_respects_margin_before_penalty(self):
         prev_my = make_state((0.0, 0.0, 30.0), angles=(0.0, 0.0, 0.0))

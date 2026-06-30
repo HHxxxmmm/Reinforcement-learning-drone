@@ -19,7 +19,7 @@ from torch import nn
 
 from envs.train_env import TrainEnv
 from utils.callback import RewardComponentsCallback
-from utils.policy_reset import reset_policy_yaw_head
+from utils.policy_reset import reset_policy_junior_p1_head, reset_policy_yaw_head
 
 ROOT = Path(__file__).resolve().parent
 
@@ -139,6 +139,22 @@ def main():
             )
     else:
         model = PPO(**ppo_kwargs)
+        policy_init = alg_cfg.get("policy_init") or {}
+        if policy_init.get("junior_p1", False):
+            action_cfg = env_cfg.get("action") or {}
+            init_info = reset_policy_junior_p1_head(
+                model,
+                max_throttle=float(action_cfg.get("max_throttle", 0.46)),
+                action_scale=float(action_cfg.get("action_scale", 0.50)),
+                target_throttle_frac=float(policy_init.get("throttle_frac", 0.88)),
+                target_pitch_cmd=float(policy_init.get("pitch_cmd", 0.12)),
+            )
+            print(
+                "Junior P1 策略偏置初始化（配平起点）: "
+                f"thr≈{init_info['target_throttle']:.2f} "
+                f"pitch_cmd≈{init_info['target_pitch_cmd']:+.2f}rad "
+                f"(bias thr={init_info['throttle_bias']:+.2f} pitch={init_info['pitch_bias']:+.2f})"
+            )
     model.set_logger(logger)
     model.learn(
         total_timesteps=int(alg_cfg.get("total_timesteps", 20000)),
