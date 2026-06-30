@@ -76,13 +76,19 @@ def run_episode(env, model, deterministic, log_interval, max_steps):
     else:
         reason = "stopped"
 
+    final_pitch_rad = float(env.my_state[4])
     final_yaw_rad = float(env.my_state[5])
     enemy_hp_final = float(env.enemy_state[12])
+    last_real = getattr(env, "_last_real_action", None)
+    final_pitch_cmd = float(last_real[1]) if last_real is not None else float("nan")
 
     return {
         "steps": steps,
         "reason": reason,
         "total_reward": total_reward,
+        "final_pitch_rad": final_pitch_rad,
+        "final_pitch_deg": float(np.degrees(final_pitch_rad)),
+        "final_pitch_cmd": final_pitch_cmd,
         "final_yaw_rad": final_yaw_rad,
         "final_yaw_deg": float(np.degrees(final_yaw_rad)),
         "enemy_hp_final": enemy_hp_final,
@@ -95,8 +101,11 @@ def run_episode(env, model, deterministic, log_interval, max_steps):
 
 def print_episode_result(episode, row):
     kill_tag = "KILL" if row["killed"] else "no_kill"
+    pitch_cmd = row.get("final_pitch_cmd", float("nan"))
+    pitch_cmd_s = f" pitch_cmd={pitch_cmd:+.3f}" if np.isfinite(pitch_cmd) else ""
     print(
         f"Episode {episode}: steps={row['steps']} reason={row['reason']} "
+        f"final_pitch={row['final_pitch_deg']:+.2f}deg ({row['final_pitch_rad']:+.4f} rad){pitch_cmd_s} "
         f"final_yaw={row['final_yaw_deg']:+.2f}deg ({row['final_yaw_rad']:+.4f} rad) "
         f"enemy_hp={row['enemy_hp_final']:.3f} min_hp={row['enemy_hp_min']:.3f} "
         f"damage={row['damage_dealt']:.3f} [{kill_tag}] reward={row['total_reward']:.1f}"
@@ -109,20 +118,23 @@ def print_summary(rows):
         return
 
     yaws = [row["final_yaw_deg"] for row in rows]
+    pitches = [row["final_pitch_deg"] for row in rows]
     hps = [row["enemy_hp_final"] for row in rows]
     kills = sum(1 for row in rows if row["killed"])
 
-    print("\n=== Eval summary (final yaw + enemy HP) ===")
+    print("\n=== Eval summary (final pitch/yaw + enemy HP) ===")
     print(f"  episodes={n}  kills={kills}/{n}")
+    print(f"  final_pitch_deg: mean={np.mean(pitches):+.2f}deg  std={np.std(pitches):.2f}deg  "
+          f"min={min(pitches):+.2f}deg  max={max(pitches):+.2f}deg")
     print(f"  final_yaw_deg: mean={np.mean(yaws):+.2f}deg  std={np.std(yaws):.2f}deg  "
           f"min={min(yaws):+.2f}deg  max={max(yaws):+.2f}deg")
     print(f"  enemy_hp_final: mean={np.mean(hps):.3f}  min={min(hps):.3f}  max={max(hps):.3f}")
     print(f"  damage_dealt: mean={np.mean([row['damage_dealt'] for row in rows]):.3f}")
-    print("\n  ep | final_yaw_deg | enemy_hp | killed | reason")
+    print("\n  ep | final_pitch_deg | final_yaw_deg | enemy_hp | killed | reason")
     for i, row in enumerate(rows, 1):
         print(
-            f"  {i:2d} | {row['final_yaw_deg']:+8.2f}deg | {row['enemy_hp_final']:6.3f} | "
-            f"{'yes' if row['killed'] else ' no '} | {row['reason']}"
+            f"  {i:2d} | {row['final_pitch_deg']:+8.2f}deg | {row['final_yaw_deg']:+8.2f}deg | "
+            f"{row['enemy_hp_final']:6.3f} | {'yes' if row['killed'] else ' no '} | {row['reason']}"
         )
 
 
@@ -179,7 +191,7 @@ def main():
     print(f"Loaded model: {model_path}")
     print(f"Environment: {env.adaptor.host}:{env.adaptor.port} room={env.room_id} unit={env.unit_id}")
     print("Keep the UE battle window visible if you want to record the flight.")
-    print("Primary metrics: final_yaw_deg, enemy_hp_final")
+    print("Primary metrics: final_pitch_deg, final_yaw_deg, enemy_hp_final")
 
     rows = []
     for episode in range(1, args.episodes + 1):
@@ -206,6 +218,9 @@ def main():
             "episode",
             "steps",
             "reason",
+            "final_pitch_rad",
+            "final_pitch_deg",
+            "final_pitch_cmd",
             "final_yaw_rad",
             "final_yaw_deg",
             "enemy_hp_final",

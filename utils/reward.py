@@ -12,6 +12,7 @@ ATTACK_MAX_RANGE_M = 660.0
 ATTACK_HALF_WIDTH_M = 10.0
 DAMAGE_REWARD_PER_HIT = 8.0
 YAW_MISALIGN_WEIGHT = 0.0
+PITCH_UP_PENALTY_WEIGHT = 0.0
 ALIGNMENT_REWARD_WEIGHT = 2.0
 ATTACK_BOX_REWARD_WEIGHT = 3.0
 CORRIDOR_REWARD_WEIGHT = 1.2
@@ -99,6 +100,7 @@ def reward_components(
     enemy_state,
     overshoot_margin_m=0.0,
     yaw_misalign_weight=None,
+    pitch_up_weight=None,
     damage_reward_per_hit=None,
     alignment_weight=None,
     attack_box_weight=None,
@@ -124,6 +126,7 @@ def reward_components(
     speed_mps = np.linalg.norm(np.asarray(my_state[6:9], dtype=np.float64)) * POSITION_SCALE_M
     enemy_alive = _health(enemy_state) > 0.0
     misalign_weight = float(YAW_MISALIGN_WEIGHT if yaw_misalign_weight is None else yaw_misalign_weight)
+    pitch_up_w = float(PITCH_UP_PENALTY_WEIGHT if pitch_up_weight is None else pitch_up_weight)
     hit_reward = float(DAMAGE_REWARD_PER_HIT if damage_reward_per_hit is None else damage_reward_per_hit)
     align_w = float(ALIGNMENT_REWARD_WEIGHT if alignment_weight is None else alignment_weight)
     atk_box_w = float(ATTACK_BOX_REWARD_WEIGHT if attack_box_weight is None else attack_box_weight)
@@ -145,6 +148,11 @@ def reward_components(
         comps["yaw_misalign_penalty"] = -misalign_weight * (1.0 - alignment_cos)
     else:
         comps["yaw_misalign_penalty"] = 0.0
+    pitch_rad = float(my_state[4])
+    if pitch_up_w > 0.0 and pitch_rad > 0.0:
+        comps["pitch_up_penalty"] = -pitch_up_w * pitch_rad
+    else:
+        comps["pitch_up_penalty"] = 0.0
     attack_box_score, in_attack_box = _attack_box_score(
         forward_distance, lateral_error, alignment_cos, attack_box_weight=atk_box_w
     )

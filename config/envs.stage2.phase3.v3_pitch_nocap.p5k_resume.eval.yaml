@@ -1,15 +1,15 @@
-# Stage-2 Phase-2 v3 pitch eval — 独立 UE 房间
+# Stage-2 Phase-3 v3 pitch nocap p5k_resume y 扫点 eval
 host: 10.119.14.141
 
 port: 1000
 unit_id: 0
-room_id: 20554
+room_id: 20572
 
 train_mode: online
 sync_step: 1
 socket_timeout: 30
 logger: false
-save_path: "./logs/stage2_phase2_v3_pitch/eval/"
+save_path: "./logs/stage2_phase3_v3_pitch_nocap_p5k_resume/eval/"
 
 stage: combat
 
@@ -17,7 +17,7 @@ stage_params:
   initial_speed: 10
   altitude_unit: 100
   enemy_pos: [120, 0, 100]
-  enemy_y_range: [0, 0]
+  enemy_y_range: [-5, 5]
   max_steps_per_episode: 512
   terminate_on_overshoot: true
   overshoot_margin_m: 30.0
@@ -30,6 +30,5 @@ action:
   max_throttle: 0.35
   lock_roll: true
   lock_pitch: false
-  max_pitch: 0.15
   lock_yaw: false
   action_scale: 0.4

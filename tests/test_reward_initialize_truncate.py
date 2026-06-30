@@ -28,6 +28,7 @@ class RewardTests(unittest.TestCase):
             "proximity",
             "alignment",
             "yaw_misalign_penalty",
+            "pitch_up_penalty",
             "attack_box",
             "corridor",
             "centerline",
@@ -201,6 +202,29 @@ class RewardTests(unittest.TestCase):
         self.assertAlmostEqual(aligned_comps["yaw_misalign_penalty"], 0.0, places=5)
         self.assertLess(misaligned_comps["yaw_misalign_penalty"], aligned_comps["yaw_misalign_penalty"])
         self.assertLess(misaligned_comps["total"], aligned_comps["total"])
+
+    def test_pitch_up_penalty_only_on_positive_pitch(self):
+        prev_my = make_state((0.0, 0.0, 30.0))
+        prev_enemy = make_state((80.0, 0.0, 30.0))
+        enemy = make_state((80.0, 0.0, 30.0))
+        level = make_state((0.0, 0.0, 30.0), angles=(0.0, 0.0, 0.0))
+        nose_up = make_state((0.0, 0.0, 30.0), angles=(0.0, 0.05, 0.0))
+        nose_down = make_state((0.0, 0.0, 30.0), angles=(0.0, -0.05, 0.0))
+
+        level_comps = reward.reward_components(
+            prev_my, prev_enemy, level, enemy, pitch_up_weight=6.0
+        )
+        up_comps = reward.reward_components(
+            prev_my, prev_enemy, nose_up, enemy, pitch_up_weight=6.0
+        )
+        down_comps = reward.reward_components(
+            prev_my, prev_enemy, nose_down, enemy, pitch_up_weight=6.0
+        )
+
+        self.assertAlmostEqual(level_comps["pitch_up_penalty"], 0.0, places=5)
+        self.assertAlmostEqual(down_comps["pitch_up_penalty"], 0.0, places=5)
+        self.assertAlmostEqual(up_comps["pitch_up_penalty"], -0.3, places=5)
+        self.assertLess(up_comps["total"], level_comps["total"])
 
     def test_damage_reward_per_hit_override(self):
         prev_my = make_state((0.0, 0.0, 30.0))

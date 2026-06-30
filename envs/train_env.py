@@ -382,6 +382,7 @@ class TrainEnv(gymnasium.Env):
             combat_reward_keys = (
                 "overshoot_margin_m",
                 "yaw_misalign_weight",
+                "pitch_up_weight",
                 "damage_reward_per_hit",
                 "alignment_weight",
                 "attack_box_weight",
