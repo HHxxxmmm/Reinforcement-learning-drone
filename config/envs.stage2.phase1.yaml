@@ -1,0 +1,35 @@
+# Stage-2 Phase-1: 正对靶、全锁姿态，只学油门/接敌节奏（从零开始，不继承 stage1）
+host: 10.119.14.141
+
+port: 1000
+unit_id: 0
+room_id: 20051
+
+train_mode: online
+sync_step: 1
+socket_timeout: 30
+logger: false
+save_path: "./logs/stage2_phase1/"
+
+stage: combat
+
+stage_params:
+  initial_speed: 10
+  altitude_unit: 100
+  enemy_pos: [120, 0, 100]
+  enemy_y_range: [0, 0]
+  max_steps_per_episode: 512
+  terminate_on_overshoot: true
+  # 正值 = 距靶前向距离 < margin 时截停
+  overshoot_margin_m: 30.0
+  log_init: true
+
+action:
+  lock_throttle: false
+  max_throttle: 0.35
+  lock_roll: true
+  lock_pitch: true
+  fixed_pitch: 0.0
+  lock_yaw: true
+  fixed_yaw: 0.0
+  action_scale: 0.4

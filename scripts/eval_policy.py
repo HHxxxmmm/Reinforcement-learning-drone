@@ -2,11 +2,17 @@
 
 Start the UE room first, update config/envs.yaml, then run for example:
 
-    python scripts/eval_policy.py --model ./model/ppo_simple_25000_steps.zip
+    python scripts/eval_policy.py \\
+        --model ./model/stage2_phase2/ppo_combat_p2_50000_steps.zip \\
+        --env-config ./config/envs.stage2.phase2.eval.yaml \\
+        --episodes 3
 """
 import argparse
+import csv
 import sys
 from pathlib import Path
+
+import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -15,7 +21,6 @@ if str(ROOT) not in sys.path:
 from stable_baselines3 import PPO
 
 from envs.train_env import TrainEnv
-from utils import action as action_utils
 from utils import reward as reward_utils
 
 
@@ -25,6 +30,100 @@ def attack_geometry(my_state, enemy_state):
     forward_distance = float((rel * forward).sum())
     lateral_error = float(((rel - forward_distance * forward) ** 2).sum() ** 0.5)
     return distance, forward_distance, lateral_error
+
+
+def run_episode(env, model, deterministic, log_interval, max_steps):
+    obs, reset_info = env.reset()
+    total_reward = 0.0
+    steps = 0
+    terminated = False
+    truncated = False
+    min_enemy_hp = 1.0
+    last_info = {}
+
+    while not (terminated or truncated):
+        agent_action, _ = model.predict(obs, deterministic=deterministic)
+        obs, reward, terminated, truncated, last_info = env.step(agent_action)
+        total_reward += float(reward)
+        steps += 1
+        min_enemy_hp = min(min_enemy_hp, float(env.enemy_state[12]))
+
+        if log_interval and steps % log_interval == 0:
+            comps = last_info.get("reward_comps", {})
+            real_action = env._marshal_action(agent_action)
+            distance, forward_distance, lateral_error = attack_geometry(env.my_state, env.enemy_state)
+            print(
+                f"step={steps:5d} reward={reward:8.3f} total={total_reward:9.3f} "
+                f"dist={distance:7.1f} fwd={forward_distance:7.1f} lat={lateral_error:7.1f} "
+                f"my_hp={env.my_state[12]:.3f} enemy_hp={env.enemy_state[12]:.3f} "
+                f"yaw={env.my_state[5]:.3f} act=[{real_action[0]:.2f},{real_action[1]:.2f},{real_action[2]:.2f},{real_action[3]:.2f}] "
+                f"attack_box={comps.get('attack_box', 0.0):.3f} "
+                f"centerline={comps.get('centerline', 0.0):.3f} "
+                f"enemy_damage={comps.get('enemy_damage', 0.0):.3f}"
+            )
+
+        if max_steps and steps >= max_steps:
+            print(f"Reached local max steps: {max_steps}")
+            env._send_finish_round()
+            break
+
+    if truncated:
+        reason = "truncated"
+    elif terminated:
+        reason = "terminated"
+    elif max_steps and steps >= max_steps:
+        reason = "max_steps"
+    else:
+        reason = "stopped"
+
+    final_yaw_rad = float(env.my_state[5])
+    enemy_hp_final = float(env.enemy_state[12])
+
+    return {
+        "steps": steps,
+        "reason": reason,
+        "total_reward": total_reward,
+        "final_yaw_rad": final_yaw_rad,
+        "final_yaw_deg": float(np.degrees(final_yaw_rad)),
+        "enemy_hp_final": enemy_hp_final,
+        "enemy_hp_min": min_enemy_hp,
+        "damage_dealt": 1.0 - min_enemy_hp,
+        "killed": enemy_hp_final <= 0.01,
+        "init_enemy_y": reset_info.get("init_enemy_y"),
+    }
+
+
+def print_episode_result(episode, row):
+    kill_tag = "KILL" if row["killed"] else "no_kill"
+    print(
+        f"Episode {episode}: steps={row['steps']} reason={row['reason']} "
+        f"final_yaw={row['final_yaw_deg']:+.2f}deg ({row['final_yaw_rad']:+.4f} rad) "
+        f"enemy_hp={row['enemy_hp_final']:.3f} min_hp={row['enemy_hp_min']:.3f} "
+        f"damage={row['damage_dealt']:.3f} [{kill_tag}] reward={row['total_reward']:.1f}"
+    )
+
+
+def print_summary(rows):
+    n = len(rows)
+    if n == 0:
+        return
+
+    yaws = [row["final_yaw_deg"] for row in rows]
+    hps = [row["enemy_hp_final"] for row in rows]
+    kills = sum(1 for row in rows if row["killed"])
+
+    print("\n=== Eval summary (final yaw + enemy HP) ===")
+    print(f"  episodes={n}  kills={kills}/{n}")
+    print(f"  final_yaw_deg: mean={np.mean(yaws):+.2f}deg  std={np.std(yaws):.2f}deg  "
+          f"min={min(yaws):+.2f}deg  max={max(yaws):+.2f}deg")
+    print(f"  enemy_hp_final: mean={np.mean(hps):.3f}  min={min(hps):.3f}  max={max(hps):.3f}")
+    print(f"  damage_dealt: mean={np.mean([row['damage_dealt'] for row in rows]):.3f}")
+    print("\n  ep | final_yaw_deg | enemy_hp | killed | reason")
+    for i, row in enumerate(rows, 1):
+        print(
+            f"  {i:2d} | {row['final_yaw_deg']:+8.2f}deg | {row['enemy_hp_final']:6.3f} | "
+            f"{'yes' if row['killed'] else ' no '} | {row['reason']}"
+        )
 
 
 def main():
@@ -62,6 +161,11 @@ def main():
         action="store_true",
         help="Use stochastic policy actions instead of deterministic actions",
     )
+    parser.add_argument(
+        "--output",
+        default="",
+        help="Optional CSV path for per-episode metrics (final_yaw_deg, enemy_hp_final, ...)",
+    )
     args = parser.parse_args()
 
     model_path = Path(args.model)
@@ -75,44 +179,47 @@ def main():
     print(f"Loaded model: {model_path}")
     print(f"Environment: {env.adaptor.host}:{env.adaptor.port} room={env.room_id} unit={env.unit_id}")
     print("Keep the UE battle window visible if you want to record the flight.")
+    print("Primary metrics: final_yaw_deg, enemy_hp_final")
 
+    rows = []
     for episode in range(1, args.episodes + 1):
-        obs, _ = env.reset()
-        total_reward = 0.0
-        steps = 0
-        terminated = False
-        truncated = False
         print(f"\n=== Eval episode {episode} ===")
-
-        while not (terminated or truncated):
-            agent_action, _ = model.predict(obs, deterministic=deterministic)
-            obs, reward, terminated, truncated, info = env.step(agent_action)
-            total_reward += reward
-            steps += 1
-
-            if steps % args.log_interval == 0:
-                comps = info.get("reward_comps", {})
-                real_action = action_utils.marshal_action(agent_action)
-                distance, forward_distance, lateral_error = attack_geometry(env.my_state, env.enemy_state)
-                print(
-                    f"step={steps:5d} reward={reward:8.3f} total={total_reward:9.3f} "
-                    f"dist={distance:7.1f} fwd={forward_distance:7.1f} lat={lateral_error:7.1f} "
-                    f"my_hp={env.my_state[12]:.3f} enemy_hp={env.enemy_state[12]:.3f} "
-                    f"yaw={env.my_state[5]:.3f} act=[{real_action[0]:.2f},{real_action[1]:.2f},{real_action[2]:.2f},{real_action[3]:.2f}] "
-                    f"attack_box={comps.get('attack_box', 0.0):.3f} "
-                    f"centerline={comps.get('centerline', 0.0):.3f} "
-                    f"enemy_damage={comps.get('enemy_damage', 0.0):.3f}"
-                )
-
-            if args.max_steps and steps >= args.max_steps:
-                print(f"Reached local max steps: {args.max_steps}")
-                break
-
-        reason = "truncated" if truncated else ("terminated" if terminated else "max_steps")
-        print(
-            f"Episode {episode} finished: steps={steps}, reason={reason}, "
-            f"total_reward={total_reward:.3f}, enemy_hp={env.enemy_state[12]:.3f}"
+        row = run_episode(
+            env,
+            model,
+            deterministic=deterministic,
+            log_interval=args.log_interval,
+            max_steps=args.max_steps,
         )
+        row["episode"] = episode
+        row["model"] = model_path.name
+        rows.append(row)
+        print_episode_result(episode, row)
+
+    print_summary(rows)
+
+    if args.output:
+        out_path = Path(args.output)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        fieldnames = [
+            "model",
+            "episode",
+            "steps",
+            "reason",
+            "final_yaw_rad",
+            "final_yaw_deg",
+            "enemy_hp_final",
+            "enemy_hp_min",
+            "damage_dealt",
+            "killed",
+            "total_reward",
+            "init_enemy_y",
+        ]
+        with open(out_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+        print(f"\nWrote {len(rows)} rows to {out_path}")
 
     env.adaptor.close()
 

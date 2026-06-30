@@ -1,0 +1,36 @@
+# Stage-2 Phase-2 v2: 从 P1@30000 重训（reward 数值同权重化前，机制仍可通过 yaml 覆盖）
+host: 10.119.14.141
+
+port: 1004
+unit_id: 0
+room_id: 20168
+
+train_mode: online
+sync_step: 1
+socket_timeout: 30
+logger: false
+save_path: "./logs/stage2_phase2_v2/"
+
+stage: combat
+
+stage_params:
+  initial_speed: 10
+  altitude_unit: 100
+  enemy_pos: [120, 0, 100]
+  enemy_y_range: [0, 0]
+  max_steps_per_episode: 512
+  terminate_on_overshoot: true
+  overshoot_margin_m: 30.0
+  log_init: true
+  yaw_misalign_weight: 10.0
+  damage_reward_per_hit: 12.0
+
+action:
+  lock_throttle: false
+  max_throttle: 0.35
+  lock_roll: true
+  lock_pitch: true
+  fixed_pitch: 0.0
+  lock_yaw: false
+  max_yaw: 0.15
+  action_scale: 0.4

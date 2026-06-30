@@ -29,9 +29,56 @@ class ActionTests(unittest.TestCase):
 
         np.testing.assert_allclose(real_action, np.array([1.0, -1.0, 0.0, 0.5]))
 
+    def test_marshal_action_can_lock_throttle(self):
+        agent_action = np.array([1.0, 0.2, -0.2, 0.4])
+
+        real_action = action.marshal_action(agent_action, lock_throttle=True, fixed_throttle=0.0)
+
+        np.testing.assert_allclose(real_action, np.array([0.0, 0.2, -0.2, 0.4]))
+
+    def test_marshal_action_can_lock_roll_and_scale(self):
+        agent_action = np.array([0.0, 1.0, 1.0, 1.0])
+
+        real_action = action.marshal_action(agent_action, lock_roll=True, action_scale=0.5)
+
+        np.testing.assert_allclose(real_action, np.array([0.5, 0.5, 0.0, 0.5]))
+
+    def test_marshal_action_can_lock_pitch(self):
+        agent_action = np.array([0.0, 1.0, 0.0, 0.5])
+
+        real_action = action.marshal_action(agent_action, lock_pitch=True, fixed_pitch=0.0)
+
+        np.testing.assert_allclose(real_action, np.array([0.5, 0.0, 0.0, 0.5]))
+
+    def test_marshal_action_can_lock_yaw(self):
+        agent_action = np.array([0.0, 0.0, 0.0, 1.0])
+
+        real_action = action.marshal_action(agent_action, lock_yaw=True, fixed_yaw=0.0, action_scale=0.4)
+
+        np.testing.assert_allclose(real_action, np.array([0.5, 0.0, 0.0, 0.0]))
+
+    def test_marshal_action_caps_throttle_with_max_throttle(self):
+        agent_action = np.array([-1.0, 0.0, 0.0, 0.0])
+
+        low = action.marshal_action(agent_action, max_throttle=0.35)
+        high = action.marshal_action(np.array([1.0, 0.0, 0.0, 0.0]), max_throttle=0.35)
+
+        self.assertAlmostEqual(low[0], 0.0)
+        self.assertAlmostEqual(high[0], 0.35)
+
+    def test_marshal_action_caps_yaw_with_max_yaw(self):
+        agent_action = np.array([0.0, 0.0, 0.0, -1.0])
+
+        low = action.marshal_action(agent_action, action_scale=0.4, max_yaw=0.15)
+        high = action.marshal_action(np.array([0.0, 0.0, 0.0, 1.0]), action_scale=0.4, max_yaw=0.15)
+
+        self.assertAlmostEqual(low[3], -0.15)
+        self.assertAlmostEqual(high[3], 0.15)
+
 
 class ObservationTests(unittest.TestCase):
     def test_zero_enemy_position_uses_fixed_target_fallback(self):
+        observation.set_enemy_fallback_position(np.array([80.0, 0.0, 30.0]))
         my = make_state((0.0, 0.0, 30.0), angles=(0.0, 0.0, 0.0), vel=(30.0, 0.0, 0.0))
         enemy = make_state((0.0, 0.0, 0.0))
 

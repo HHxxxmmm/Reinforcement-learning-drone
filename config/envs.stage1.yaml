@@ -1,0 +1,41 @@
+host: 10.119.14.141
+
+port: 1002
+unit_id: 0
+room_id: 19970
+
+train_mode: online
+sync_step: 1
+socket_timeout: 30
+logger: false
+save_path: "./logs/stage1_align_v3/"
+
+stage: align1
+
+stage_params:
+  init_mode: align_ta_v2
+  altitude_unit: 100
+  enemy_pos: [120, 0, 100]
+  # yaw=0；y∈[-10,10] → 初始视线角差约 0°~4.8°
+  enemy_y_range: [-10, 10]
+  initial_yaw: 0
+  setup_orientation: false
+  log_init_alignment: true
+  # 成功对准：视线角 ≤ 2.5°
+  align_target_deg: 2.5
+  cosine_weight: 5.0
+  # hold 达标即 terminated 截停；每成功 5 局 required +2，无上限
+  hold_steps: 8
+  hold_steps_increment: 2
+  hold_steps_every_successes: 5
+  success_bonus_per_hold_step: 10.0
+  log_hold_curriculum: true
+  # 动态超时：step >= hold_count + timeout_extra_steps → truncated + 惩罚
+  timeout_extra_steps: 100
+  timeout_penalty: -1.5
+
+action:
+  lock_throttle: true
+  fixed_throttle: 0.0
+  lock_roll: true
+  action_scale: 0.35

@@ -37,11 +37,14 @@ def resolve_device(device_cfg):
 def build_policy_kwargs(raw):
     raw = raw or {}
     net_arch = raw.get("net_arch", {"pi": [128, 128], "vf": [128, 128]})
-    return dict(
+    kwargs = dict(
         activation_fn=nn.Tanh,
         net_arch=net_arch,
         ortho_init=bool(raw.get("ortho_init", False)),
     )
+    if "log_std_init" in raw:
+        kwargs["log_std_init"] = float(raw["log_std_init"])
+    return kwargs
 
 
 def main():
@@ -56,10 +59,16 @@ def main():
         default=str(ROOT / "config" / "algs.yaml"),
         help="算法与训练超参配置",
     )
+    parser.add_argument(
+        "--load",
+        default="",
+        help="从已有 PPO .zip 续训（覆盖 config 中的 load_path）",
+    )
     args = parser.parse_args()
 
     alg_cfg = load_yaml(args.config)
     env_cfg = load_yaml(args.env_config)
+    load_path = args.load or alg_cfg.get("load_path") or ""
 
     log_dir = alg_cfg.get("log_dir", "./logs/")
     model_dir = alg_cfg.get("model_dir", "./model/")
@@ -71,6 +80,8 @@ def main():
 
     print(f"环境: {env_cfg.get('host')}:{env_cfg.get('port')} room={env_cfg.get('room_id')}")
     print(f"训练: {alg_cfg.get('algorithm', 'PPO')} device={device} steps={alg_cfg.get('total_timesteps')}")
+    if load_path:
+        print(f"续训: {load_path}  reset_num_timesteps={alg_cfg.get('reset_num_timesteps', True)}")
     print(f"日志: {log_dir}  模型: {model_dir}")
     print("请确认 UE 已进入对战画面后再开始训练。")
 
@@ -89,7 +100,7 @@ def main():
     base_env = TrainEnv(config_path=args.env_config)
     env = Monitor(base_env, filename=os.path.join(log_dir, "monitor.csv"))
 
-    model = PPO(
+    ppo_kwargs = dict(
         policy="MlpPolicy",
         env=env,
         verbose=1,
@@ -108,6 +119,14 @@ def main():
         policy_kwargs=build_policy_kwargs(ppo_cfg.get("policy_kwargs")),
         device=device,
     )
+
+    if load_path:
+        if not os.path.isfile(load_path):
+            raise FileNotFoundError(f"Checkpoint not found: {load_path}")
+        model = PPO.load(load_path, env=env, device=device)
+        model.set_env(env)
+    else:
+        model = PPO(**ppo_kwargs)
     model.set_logger(logger)
     model.learn(
         total_timesteps=int(alg_cfg.get("total_timesteps", 20000)),
@@ -116,7 +135,8 @@ def main():
         log_interval=int(alg_cfg.get("log_interval", 1)),
         callback=callbacks,
     )
-    final_path = os.path.join(model_dir, "ppo_simple_final")
+    name_prefix = alg_cfg.get("checkpoint", {}).get("name_prefix", "ppo_simple")
+    final_path = os.path.join(model_dir, f"{name_prefix}_final")
     model.save(final_path)
     print(f"训练完成，最终模型已保存: {final_path}.zip")
 

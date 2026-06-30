@@ -9,7 +9,16 @@ MAX_ALT_UNIT     = 100.0       # 100 units = 1000 m  (reasonable combat ceiling)
 MAX_SPEED_UNIT   = 30.0        #  30 units =  300 m/s
 NORMALIZED_HP_THRESHOLD = 1.5
 THOUSAND_POINT_HP = 1000.0
-FIXED_TARGET_POS_UNIT = np.array([120.0, 0.0, 30.0])
+DEFAULT_FIXED_TARGET_POS_UNIT = np.array([120.0, 0.0, 100.0])
+FIXED_TARGET_POS_UNIT = DEFAULT_FIXED_TARGET_POS_UNIT.copy()
+
+
+def set_enemy_fallback_position(pos_unit):
+    """Override fallback enemy position when the platform reports (0, 0, 0)."""
+    global FIXED_TARGET_POS_UNIT
+    FIXED_TARGET_POS_UNIT = np.asarray(pos_unit, dtype=np.float64).copy()
+
+
 ATTACK_MIN_RANGE_M = 60.0
 ATTACK_MAX_RANGE_M = 660.0
 ATTACK_CENTERLINE_SCALE_M = 200.0

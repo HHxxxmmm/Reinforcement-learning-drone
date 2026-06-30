@@ -1,0 +1,31 @@
+host: 10.119.14.141
+
+port: 1000
+unit_id: 0
+room_id: 19988
+
+train_mode: online
+sync_step: 1
+socket_timeout: 30
+logger: false
+save_path: "./logs/stage2_combat/"
+
+stage: combat
+
+stage_params:
+  initial_speed: 10
+  altitude_unit: 100
+  enemy_pos: [120, 0, 100]
+  # 先固定 y=0 正对靶训练；稳定后可改回 [-5, 5]
+  enemy_y_range: [0, 0]
+  max_steps_per_episode: 512
+  terminate_on_overshoot: true
+  overshoot_margin_m: -150
+  log_init: true
+
+action:
+  lock_throttle: false
+  lock_roll: true
+  lock_pitch: true
+  fixed_pitch: 0.0
+  action_scale: 0.4
