@@ -1,0 +1,38 @@
+# Stage-2 Phase-2 v3 续训：从已有 p2_v3 ckpt 继续（不 reset yaw）
+# 用法：eval 选出最佳 ckpt 后，改 load_path 再跑
+algorithm: PPO
+load_path: "./model/stage2_phase2_v3/ppo_combat_p2_v3_9000_steps.zip"
+reset_yaw_head_on_load: false
+total_timesteps: 80000
+reset_num_timesteps: false
+log_interval: 1
+progress_bar: true
+
+log_dir: "./logs/stage2_phase2_v3/"
+model_dir: "./model/stage2_phase2_v3/"
+reward_components_csv: "./logs/stage2_phase2_v3/reward_components.csv"
+
+checkpoint:
+  save_freq: 1000
+  name_prefix: "ppo_combat_p2_v3"
+
+device: auto
+
+ppo:
+  learning_rate: 5.0e-5
+  n_steps: 768
+  batch_size: 256
+  n_epochs: 3
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_range: 0.1
+  ent_coef: 0.005
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  target_kl: 0.05
+  policy_kwargs:
+    net_arch:
+      pi: [128, 128]
+      vf: [128, 128]
+    ortho_init: false
+    log_std_init: -1.0
